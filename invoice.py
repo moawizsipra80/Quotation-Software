@@ -635,7 +635,7 @@ class InvoiceApp(QuotationApp):
 
         # --- QR CODE & SOCIAL ICONS SETUP ---
         website_link = "https://www.orientmarketing.com.pk/"
-        qr_string = f"Invoice No: {self.quotation_no_var.get()}\nDate: {self.doc_date_var.get()}\nClient: {self.client_name_var.get()}\nNet Amount: {net_amt_txt}\n{website_link}"
+        qr_string = f"Invoice No: {self.quotation_no_var.get()}\nDate: {self.doc_date_var.get()}\nClient: {self.client_name_var.get()}\nNet Amount: {self.grand_total_var.get()}\n{website_link}"
         qr_img = self._generate_qr_code(qr_string, size_inch=0.5)
 
         
