@@ -258,23 +258,44 @@ class InvoiceApp(QuotationApp):
         bot.pack(fill='both', expand=True, pady=10)
         bot.columnconfigure(0, weight=1); bot.columnconfigure(1, weight=1); bot.columnconfigure(2, weight=1)
 
-        # Col 1: Calc
-        col1 = ttk.Frame(bot)
+        # Col 1: Financial Settings (New)
+        col1 = ttk.Labelframe(bot, text="Financial Settings", bootstyle="info", padding=15)
         col1.grid(row=0, column=0, sticky="nsew", padx=5)
-        fin_box = ttk.LabelFrame(col1, text="Totals")
-        fin_box.pack(fill='x')
-        r1 = ttk.Frame(fin_box); r1.pack(fill='x', pady=5)
+
+        # Currency & Tax Rate
+        r1 = ttk.Frame(col1)
+        r1.pack(fill='x', pady=5)
+        ttk.Label(r1, text="Currency:").pack(side='left')
+        ttk.Combobox(r1, textvariable=self.currency_var, values=["PKR", "USD", "EUR", "GBP"], width=5).pack(side='left', padx=5)
+        self.currency_var.trace('w', self.update_currency_symbol)
         
-        tk.Label(r1, text="GST %:").pack(side='left')
-        gst_ent = ttk.Entry(r1, textvariable=self.gst_rate_var, width=5)
-        gst_ent.pack(side='left', padx=5)
-        gst_ent.bind('<FocusOut>', lambda e: self.recalc_all())
+        ttk.Label(r1, text="Global Tax %:").pack(side='left', padx=(10, 5))
+        gst_e = ttk.Entry(r1, textvariable=self.gst_rate_var, width=6)
+        gst_e.pack(side='left')
+        gst_e.bind('<FocusOut>', lambda e: self.recalc_all())
+
+        # --- FINANCIAL SUMMARY ---
+        ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=10)
         
-        self.tax_lbl = tk.Label(col1, text="Total Tax: 0.00", font=("Segoe UI", 12), fg="#c0392b")
-        self.tax_lbl.pack(pady=(10, 0), anchor='w')
+        def add_sum_row(parent, label, val_var, chk_var, is_bold=False):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            ttk.Checkbutton(f, variable=chk_var, bootstyle="round-toggle").pack(side='left', padx=(0,5))
+            font = ("Segoe UI", 10, "bold") if is_bold else ("Segoe UI", 10)
+            ttk.Label(f, text=label, width=12, font=font).pack(side='left')
+            e = ttk.Entry(f, textvariable=val_var, justify='right', font=font, width=15)
+            e.pack(side='right', fill='x', expand=True)
+            return e
+
+        add_sum_row(col1, "Sub Total:", self.subtotal_var, self.print_subtotal_var)
+        add_sum_row(col1, "Total Tax:", self.tax_total_var, self.print_tax_var)
+        add_sum_row(col1, "Grand Total:", self.grand_total_var, self.print_grand_total_var, is_bold=True)
         
-        self.total_lbl = tk.Label(col1, text="Net Amount: 0.00", font=("Segoe UI", 14, "bold"), fg="blue")
-        self.total_lbl.pack(pady=(5, 15), anchor='w')
+        # Extra Fields Container
+        ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=10)
+        ttk.Button(col1, text="+ Add Extra Field", bootstyle="secondary-outline", command=self.add_extra_field).pack(anchor='w', fill='x')
+        self.extra_cont = ttk.Frame(col1)
+        self.extra_cont.pack(fill='x', pady=5)
 
         # Col 2: Terms
         col2 = ttk.LabelFrame(bot, text="Terms")
@@ -539,7 +560,7 @@ class InvoiceApp(QuotationApp):
             
         # Grand Total
         if hasattr(self, 'print_grand_total_var') and self.print_grand_total_var.get():
-            val = self.grand_total_var.get() if hasattr(self, 'grand_total_var') else net_amt_txt
+            val = self.grand_total_var.get() if hasattr(self, 'grand_total_var') else "0.00"
             summary_data.append([
                 Paragraph("<b>Grand Total:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT, fontSize=11)),
                 Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT, fontSize=11))
