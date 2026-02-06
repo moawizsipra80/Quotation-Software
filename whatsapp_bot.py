@@ -22,9 +22,37 @@ def send_messages(file_path, message_text, attachment_path=None):
     except Exception as e:
         return f"Error reading file: {e}"
 
-    df.columns = [c.strip() for c in df.columns]
-    if 'Phone Number' not in df.columns:
-        return "Error: Excel file must have 'Phone Number' column!"
+    # --- SMART AUTO-DETECTION ---
+    phone_col = None
+    priority_keywords = ['phone', 'mobile', 'contact', 'whatsapp', 'cell', 'number']
+    
+    # Strip spaces from column names
+    df.columns = [str(c).strip() for c in df.columns]
+    
+    # Priority 1: Search by Header Keywords
+    for col in df.columns:
+        if any(key in col.lower() for key in priority_keywords):
+            phone_col = col
+            break
+            
+    # Priority 2: Data Scan (If Keywords Not Found)
+    if not phone_col:
+        for col in df.columns:
+            valid_samples = 0
+            # Scan first 5 rows
+            for val in df[col].head(5):
+                cleaned = "".join(filter(str.isdigit, str(val)))
+                if 10 <= len(cleaned) <= 11: 
+                    valid_samples += 1
+            
+            if valid_samples >= 2: # Significant match
+                phone_col = col
+                break
+                
+    if not phone_col:
+        return "Error: Could not detect a 'Phone Number' column. Please name it correctly or provide valid data."
+    
+    print(f"🎯 Auto-detected '{phone_col}' as your Phone Number column.")
 
     # 2. Browser Setup
     options = webdriver.ChromeOptions()
@@ -57,17 +85,24 @@ def send_messages(file_path, message_text, attachment_path=None):
         # 4. Main Loop
         for index, row in df.iterrows():
             try:
-                raw_number = str(row['Phone Number'])
+                raw_number = str(row[phone_col]).strip()
+                if raw_number.endswith('.0'): raw_number = raw_number[:-2]
+                
                 name = str(row.get('Company Name', 'Client'))
                 
-                if "Found" in raw_number or len(raw_number) < 5:
-                    print(f"Skipping Invalid Number: {name}")
+                # --- EXTRACT DIGITS ONLY ---
+                number = "".join(filter(str.isdigit, raw_number))
+                
+                if len(number) < 10:
+                    print(f"Skipping Invalid Number: {name} ({raw_number})")
                     failed_count += 1
                     continue
 
-                number = raw_number.replace(".0", "").replace("-", "").replace(" ", "").replace("+", "")
-                if number.startswith("03"): number = "92" + number[1:]
-                elif not number.startswith("92"): number = "92" + number
+                # Pakistan specific normalization (03xx -> 923xx)
+                if number.startswith("03") and len(number) == 11: 
+                    number = "92" + number[1:]
+                elif len(number) == 10 and not number.startswith("92"): 
+                    number = "92" + number
                     
                 print(f"[{index+1}/{len(df)}] Sending to: {name} ({number})...")
 
