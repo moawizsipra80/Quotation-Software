@@ -474,7 +474,7 @@ class CommercialApp(QuotationApp):
 
         # FIXED-FLEX COLUMN WIDTH LOGIC
         CW = 540 # Total Content Width
-        fixed_widths = {'sno': 30, 'uom': 40, 'qty': 55, 'price': 70, 'amount': 80, 'gst': 70, 'total': 90}
+        fixed_widths = {'sno': 30, 'uom': 40, 'qty': 55, 'price': 70, 'amount': 95, 'gst': 70, 'total': 100}
         
         # Special handling: leave space for the 'spare' column (0.6 inch = 43.2 points)
         SPARE_W = 43.2
@@ -534,6 +534,8 @@ class CommercialApp(QuotationApp):
             ('BOX', (0,0), (-1,-1), 1, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
         ]))
         elements.append(t_items)
         elements.append(Spacer(1, 20))

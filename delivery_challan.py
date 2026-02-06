@@ -889,12 +889,20 @@ class DeliveryChallanApp(QuotationApp):
                 if c['type'] in ['number', 'calc', 'global_pct']:
                     try: val = f"{float(val):,.2f}"; p_style = item_num
                     except: pass
+                # Leading adjust kiya
+                p_style.leading = 9
                 row.append(Paragraph(str(val).replace("\n", "<br/>"), p_style))
             data.append(row)
         
         if len(print_cols) > 0:
             t_items = Table(data, colWidths=[(7.4*inch)/len(print_cols)]*len(print_cols), repeatRows=1)
-            t_items.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.black), ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('VALIGN', (0,0), (-1,-1), 'TOP')]))
+            t_items.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black), 
+                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), 
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ]))
             elements.append(t_items)
         
         grand = self.total_lbl.cget("text").split("Net Amount:")[1].strip() if "Net Amount:" in self.total_lbl.cget("text") else "0.00"

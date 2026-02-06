@@ -136,10 +136,10 @@ class QuotationApp:
             {'id': 'desc',  'label': 'Description', 'width': 350, 'type': 'text'},
             {'id': 'uom',   'label': 'UOM', 'width': 60, 'type': 'text'},
             {'id': 'qty',   'label': 'Qty', 'width': 60, 'type': 'number'},
-            {'id': 'price', 'label': 'Price', 'width': 90, 'type': 'number'},
-            {'id': 'amount','label': 'Amount', 'width': 90, 'type': 'calc'},
+            {'id': 'price', 'label': 'Price', 'width': 120, 'type': 'number'},
+            {'id': 'amount','label': 'Amount', 'width': 120, 'type': 'calc'},
             {'id': 'gst',   'label': 'Tax', 'width': 80, 'type': 'calc'},
-            {'id': 'total', 'label': 'Total', 'width': 100, 'type': 'calc'}
+            {'id': 'total', 'label': 'Total', 'width': 120, 'type': 'calc'}
         ]
         self.dynamic_vars = {}
 
@@ -2271,7 +2271,7 @@ class QuotationApp:
         for c in self.columns_config:
             sym = " ✔️" if c.get('printable', True) else " ❌"
             self.tree.heading(c['id'], text=c['label'] + sym)
-            self.tree.column(c['id'], width=c['width'], anchor="center" if c['type']!='text' else 'w')
+            self.tree.column(c['id'], width=c['width'], anchor="center" if c['type']=='auto' else ("e" if c['type'] in ['number', 'calc', 'global_pct'] else "w"))
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -2924,20 +2924,32 @@ class QuotationApp:
         # 3. DYNAMIC TABLE
         print_cols = [c for c in self.columns_config if c.get('printable', True)]
         # Width logic (fixed for symmetry)
-        fw = {'sno': 25, 'uom': 35, 'qty': 45, 'price': 65, 'amount': 75, 'gst': 65, 'total': 85}
-        pdf_widths = [fw.get(c['id'], (CW-395)/(len(print_cols)-7 if len(print_cols)>7 else 1)) for c in print_cols]
+        fw = {'sno': 25, 'uom': 35, 'qty': 45, 'price': 65, 'amount': 95, 'gst': 65, 'total': 100}
+        pdf_widths = [fw.get(c['id'], (CW-430)/(len(print_cols)-7 if len(print_cols)>7 else 1)) for c in print_cols]
 
         data = [[Paragraph(f"<b>{c['label']}</b>", ParagraphStyle('H', parent=norm_style, fontSize=9, alignment=TA_CENTER)) for c in print_cols]]
         for item in self.items_data:
             row = []
             for c in print_cols:
                 val = item.get(c['id'], "")
-                p_s = ParagraphStyle('Cell', parent=norm_style, fontSize=8, alignment=TA_RIGHT if c['type'] in ['number','calc'] else TA_LEFT)
+                # Leading adjust kiya taake text wrap na ho
+                p_s = ParagraphStyle('Cell', parent=norm_style, fontSize=8, leading=9, alignment=TA_RIGHT if c['type'] in ['number','calc','global_pct'] else TA_LEFT)
+                
+                if c['type'] in ['number', 'calc', 'global_pct']:
+                    try: val = f"{float(val):,.2f}"
+                    except: pass
+                
                 row.append(Paragraph(str(val), p_s))
             data.append(row)
 
         t_items = Table(data, colWidths=pdf_widths, repeatRows=1)
-        t_items.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.black), ('BACKGROUND', (0,0), (-1,0), self.header_color)]))
+        t_items.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black), 
+            ('BACKGROUND', (0,0), (-1,0), self.header_color),
+            ('TOPPADDING', (0,0), (-1,-1), 4),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
         elements.append(t_items)
 
         # 4. TERMS & SIGNATURES BLOCK (KeepTogether protection)
