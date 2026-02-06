@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import datetime
 # import sqlite3
-import pyodbc
+import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
@@ -77,6 +77,15 @@ class InvoiceApp(QuotationApp):
 
         # Use parent's comprehensive editing method that allows editing ALL columns
         self.tree.bind("<Double-1>", self.on_tree_double_click)
+        
+        self._init_default_widths_invoice()
+        
+    def _init_default_widths_invoice(self):
+        # Optimized default widths for Sales Tax Invoice
+        opt_widths = {'sno': 25, 'uom': 35, 'qty': 45, 'price': 65, 'amount': 85, 'gst': 65, 'total': 95, 'desc': 125}
+        for col in self.columns_config:
+            if col['id'] in opt_widths:
+                col['width'] = opt_widths[col['id']]
 
     #  LOAD LOGO FUNCTION
     def load_logo(self, which):
@@ -130,13 +139,9 @@ class InvoiceApp(QuotationApp):
     
     def init_database(self):
         try:
-            import pyodbc
-            self.conn = pyodbc.connect(
-                r'DRIVER={ODBC Driver 17 for SQL Server};'
-                r'SERVER=.\SQLEXPRESS;'
-                r'DATABASE=QuotationDB;'
-                'Trusted_Connection=yes;'
-            )
+            import sqlite3
+            db_name = "QuotationManager_Final.db"
+            self.conn = sqlite3.connect(db_name)
             self.cursor = self.conn.cursor()
         except Exception as e:
             print(f"DB Connection Error: {e}")
@@ -324,8 +329,12 @@ class InvoiceApp(QuotationApp):
         
         r_txt = ttk.Frame(ft_box); r_txt.pack(fill='x', pady=2)
         tk.Label(r_txt, text="Text:").pack(side='left')
-        ttk.Entry(r_txt, textvariable=self.footer_text_var).pack(side='left', fill='x', expand=True)
-        ttk.Checkbutton(r_txt, text="Full", variable=self.footer_full_width_var).pack(side='left')
+        ttk.Entry(r_txt, textvariable=self.footer_text_var).pack(side='left', fill='x', expand=True, padx=(0,5))
+        
+        # New Row for Options (Full Width & Pin Bottom)
+        r_opt = ttk.Frame(ft_box); r_opt.pack(fill='x', pady=2)
+        ttk.Checkbutton(r_opt, text="Full Width", variable=self.footer_full_width_var).pack(side='left', padx=5)
+        ttk.Checkbutton(r_opt, text="Pin to Bottom", variable=self.footer_pin_to_bottom_var).pack(side='left', padx=5)
         
         r_aln = ttk.Frame(ft_box); r_aln.pack(fill='x', pady=2)
         tk.Label(r_aln, text="Align:").pack(side='left')
@@ -435,7 +444,7 @@ class InvoiceApp(QuotationApp):
             [mk_b("email"), mk_n(self.vendor_email_var.get())]
         ]
 
-        t_left = Table(l_data, colWidths=[1.1*inch, 1.5*inch, 1.0*inch, 1.2*inch])
+        t_left = Table(l_data, colWidths=[85, 120, 75, 95]) # Sum = 375
         t_left.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -444,7 +453,7 @@ class InvoiceApp(QuotationApp):
             ('SPAN', (1,5), (3,5)) 
         ]))
 
-        t_right = Table(r_data, colWidths=[1.0*inch, 1.5*inch])
+        t_right = Table(r_data, colWidths=[70, 95]) # Sum = 165. Total 375 + 165 = 540.
         t_right.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -454,7 +463,7 @@ class InvoiceApp(QuotationApp):
         l_title = Paragraph(f"<b>{self.left_header_title.get()}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11))
         r_title = Paragraph(f"<b>{self.right_header_title.get()}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11))
         
-        t_main = Table([[l_title, r_title],[t_left, t_right]], colWidths=[4.9*inch, 2.6*inch])
+        t_main = Table([[l_title, r_title],[t_left, t_right]], colWidths=[375, 165]) # Exact 540 Total Content Width
         t_main.setStyle(TableStyle([
             ('BOX', (0,0), (-1,-1), 1, colors.black), 
             ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
@@ -481,29 +490,20 @@ class InvoiceApp(QuotationApp):
         data = [headers]
         total_tax_calc = 0.0
 
-        # FIXED-FLEX COLUMN WIDTH LOGIC
+        # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
+        # Treats user-defined widths in 'Manage Columns' as weights
         CW = 540 # Content Width
-        fixed_widths = {'sno': 30, 'uom': 40, 'qty': 55, 'price': 70, 'amount': 95, 'gst': 70, 'total': 100}
         
-        pdf_col_widths = []
-        flex_indices = []
-        used_fixed_width = 0
+        # 1. Get Raw Widths from Config
+        raw_widths = [float(c.get('width', 50)) for c in print_cols]
+        total_raw = sum(raw_widths)
         
-        for idx, c in enumerate(print_cols):
-            if c['id'] in fixed_widths:
-                w = fixed_widths[c['id']]
-                pdf_col_widths.append(w)
-                used_fixed_width += w
-            else:
-                pdf_col_widths.append(None) # Placeholder
-                flex_indices.append(idx)
+        # 2. Calculate Scale Factor
+        if total_raw == 0: total_raw = 1 
+        scale_factor = CW / total_raw
         
-        # Allocate remaining space to flexible columns (Description, etc.)
-        if flex_indices:
-            remaining_space = CW - used_fixed_width
-            share = remaining_space / len(flex_indices)
-            for i in flex_indices:
-                pdf_col_widths[i] = share
+        # 3. Apply Scale Factor
+        pdf_col_widths = [w * scale_factor for w in raw_widths]
         
         for item in self.items_data:
             total_tax_calc += item.get('gst', 0.0)
@@ -523,7 +523,7 @@ class InvoiceApp(QuotationApp):
         
         t_items = Table(data, colWidths=pdf_col_widths, repeatRows=1, splitByRow=True)
         t_items.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-2), 0.5, colors.black),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BOX', (0,0), (-1,-1), 1, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
@@ -768,12 +768,10 @@ class InvoiceApp(QuotationApp):
             else:
                 self.cursor.execute("""
                     INSERT INTO tax_invoices (ref_no, client_name, date, grand_total, full_data)
-                    OUTPUT INSERTED.ID
                     VALUES (?,?,?,?,?)
                 """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str))
                 
-                row = self.cursor.fetchone()
-                if row: self.current_db_id = int(row[0])
+                self.current_db_id = self.cursor.lastrowid
             
             self.conn.commit()
             if not silent: messagebox.showinfo("Saved", "Invoice Database Updated!")

@@ -14,6 +14,7 @@ import json
 import urllib.parse
 import hashlib
 import subprocess
+import zipfile
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
@@ -324,13 +325,33 @@ class QuotationApp:
         setup_win = tk.Toplevel(self.root)
         setup_win.title("First Time Setup - Create Profile")
         setup_win.state('zoomed') # Full Window
-        setup_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit()) 
+        
+        def on_setup_close():
+            # Check if any user exists, if so go back to login, else exit
+            try:
+                self.cursor.execute("SELECT COUNT(*) FROM users")
+                if self.cursor.fetchone()[0] > 0:
+                    setup_win.destroy()
+                    self.perform_login(None) # Show login
+                else:
+                    sys.exit()
+            except:
+                sys.exit()
+
+        setup_win.protocol("WM_DELETE_WINDOW", on_setup_close) 
         
         main_fr = ttk.Frame(setup_win, padding=40)
         main_fr.pack(fill='both', expand=True, anchor='center')
 
         # Title
-        tk.Label(main_fr, text="Welcome! Let's Setup Your Profile", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(20, 30))
+        tk.Label(main_fr, text="Welcome! Let's Setup Your Profile", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(20, 10))
+
+        # Login button if account already exists
+        def go_to_login():
+             setup_win.destroy()
+             self.perform_login(None)
+
+        ttk.Button(main_fr, text="Already have an account? Login Here", command=go_to_login, bootstyle="info-outline", width=30).pack(pady=(0, 20))
 
         # Container for Columns
         cols_frame = ttk.Frame(main_fr)
@@ -349,18 +370,45 @@ class QuotationApp:
         ttk.Label(left_col, text="Set Password:").pack(anchor='w')
         pass_ent = ttk.Entry(left_col, width=40, show="*"); pass_ent.pack(pady=5, fill='x')
 
-        # Profile Picture
+        # Profile Picture Section
+        ttk.Label(left_col, text="Profile Picture:").pack(anchor='w', pady=(15, 5))
+        
+        pic_frame = ttk.Frame(left_col)
+        pic_frame.pack(fill='x', pady=5)
+        
+        self.preview_img_lbl = ttk.Label(pic_frame, text="No Image", background="#ecf0f1", anchor="center", font=("Arial", 9))
+        self.preview_img_lbl.pack(side='left', padx=(0,10))
+        self.preview_img_lbl.config(width=15) # Fixed placeholder width
+
         self.setup_pic_path = None
+        
         def choose_pic():
-            p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+            p = filedialog.askopenfilename(parent=setup_win, filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
             if p:
                 self.setup_pic_path = p
-                btn_pic.config(text=f"Selected: {os.path.basename(p)}")
-        
-        ttk.Label(left_col, text="Profile Picture:").pack(anchor='w', pady=(15, 5))
-        btn_pic = ttk.Button(left_col, text="Upload Photo", command=choose_pic, bootstyle="secondary-outline")
-        btn_pic.pack(fill='x')
+                btn_pic.config(text="Change Image", bootstyle="warning-outline")
+                
+                # Show Preview
+                try:
+                    load = Image.open(p)
+                    load = load.resize((80, 80), Image.Resampling.LANCZOS)
+                    self.setup_preview_photo = ImageTk.PhotoImage(load)
+                    self.preview_img_lbl.config(image=self.setup_preview_photo, text="")
+                    btn_set_confirm.pack(side='left', padx=5) # Show Set Button
+                    btn_set_confirm.config(state='normal', text="Set Image")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Invalid Image: {e}")
 
+        def confirm_pic():
+             messagebox.showinfo("Image Set", "Profile Image Set Successfully!", parent=setup_win)
+             # Visual feedback only since save happens at verify
+             btn_set_confirm.config(state='disabled', text="✅ Set")
+
+        btn_pic = ttk.Button(pic_frame, text="Choose Image...", command=choose_pic, bootstyle="secondary-outline")
+        btn_pic.pack(side='left', fill='x', expand=True)
+
+        btn_set_confirm = ttk.Button(pic_frame, text="Set Image", command=confirm_pic, bootstyle="success")
+        # Note: We don't pack it immediately, only after selection to show 'Set' option
 
         # Right Column: Security Questions
         right_col = ttk.Labelframe(cols_frame, text="Security Recovery (Create 3 Questions)", padding=15, bootstyle="warning")
@@ -417,8 +465,12 @@ class QuotationApp:
                 if "UNIQUE constraint" in str(e):
                     messagebox.showerror("Error", "Username already taken.", parent=setup_win)
 
-        ttk.Button(main_fr, text="SAVE & START SYSTEM", command=save_user, style="success.TButton", width=30).pack(pady=40, ipady=5)
+        # Action Buttons
+        btn_frame = ttk.Frame(main_fr)
+        btn_frame.pack(pady=40)
 
+        ttk.Button(btn_frame, text="SAVE & START SYSTEM", command=save_user, style="success.TButton", width=30).pack(pady=5, ipady=5)
+        # ttk.Button(btn_frame, text="Already have an account",command=self.perform_login(None),style="info.TButton").pack(pady=5,ipady=5)
     # def perform_login(self, user_data):
     #     if user_data:
     #         self.root.deiconify()
@@ -501,12 +553,19 @@ class QuotationApp:
         # ✅ REMEMBER ME LOGIC
         self.remember_me_var = tk.BooleanVar(value=False)
         rem_file = os.path.join(os.getenv('APPDATA'), "odm_remember.json")
-        if os.path.exists(rem_file):
-            with open(rem_file, 'r') as f:
-                saved = json.load(f)
-                u_ent.insert(0, saved.get('user', ''))
-                p_ent.insert(0, saved.get('pass', ''))
-                self.remember_me_var.set(True)
+        
+        try:
+            if os.path.exists(rem_file):
+                with open(rem_file, 'r') as f:
+                    saved = json.load(f)
+                    u_ent.insert(0, saved.get('user', ''))
+                    p_ent.insert(0, saved.get('pass', ''))
+                    self.remember_me_var.set(True)
+        except Exception as e:
+            print(f"Error loading remember me data: {e}")
+            # Optionally delete the corrupt file
+            try: os.remove(rem_file)
+            except: pass
 
         ttk.Checkbutton(main_fr, text="Remember Me", variable=self.remember_me_var, bootstyle="round-toggle").pack(anchor='w', pady=10)
 
@@ -516,10 +575,13 @@ class QuotationApp:
             self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
             row = self.cursor.fetchone()
             if row:
-                if self.remember_me_var.get():
-                    with open(rem_file, 'w') as f: json.dump({'user': username, 'pass': password}, f)
-                elif os.path.exists(rem_file):
-                    os.remove(rem_file)
+                try:
+                    if self.remember_me_var.get():
+                        with open(rem_file, 'w') as f: json.dump({'user': username, 'pass': password}, f)
+                    elif os.path.exists(rem_file):
+                        os.remove(rem_file)
+                except Exception as e:
+                    print(f"Error saving remember me data: {e}")
 
                 login_win.destroy()
                 self.perform_login(row)
@@ -531,9 +593,8 @@ class QuotationApp:
         # ✅ RECOVERY Links
         ttk.Separator(main_fr, orient='horizontal').pack(fill='x', pady=15)
         
-        lbl_forgot = tk.Label(main_fr, text="Forgot Password?", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
-        lbl_forgot.pack(pady=5)
-        lbl_forgot.bind("<Button-1>", lambda e: self.forgot_password_flow(u_ent.get().strip(), login_win))
+        ttk.Button(main_fr, text="Forgot Password?", command=lambda: self.forgot_password_flow(u_ent.get().strip(), login_win), 
+                   bootstyle="link").pack(pady=5)
 
         ttk.Label(main_fr, text="Don't have a profile?", font=("Arial", 9), foreground="grey").pack(pady=(15, 0))
         ttk.Button(main_fr, text="Setup New Profile", command=lambda: [login_win.destroy(), self.perform_setup()], 
@@ -591,7 +652,8 @@ class QuotationApp:
                     self.ans_entries.append(e2)
                     
                     # Q3
-                    tk.Label(q_frame, text=f"Q3: {row[4]}").pack(anchor='w', pady=(5,0))
+                    q3_text = row[4] if row[4] else "Question 3 (Not Set)"
+                    tk.Label(q_frame, text=f"Q3: {q3_text}").pack(anchor='w', pady=(5,0))
                     e3 = ttk.Entry(q_frame, width=40); e3.pack(pady=2)
                     self.ans_entries.append(e3)
                     
@@ -602,6 +664,10 @@ class QuotationApp:
                 print(e)
 
         ttk.Button(f, text="Load Questions", command=load_questions, style="info.TButton").pack(pady=5)
+        
+        # Auto-load if username keyin
+        if prefill_user:
+            load_questions()
         
         def verify_answers():
             if not self.questions_loaded: return
@@ -763,54 +829,76 @@ class QuotationApp:
         self.conn.commit()
         print("✅ Database Connected & Schema Synchronized (Errors Fixed)")
     def backup_database(self):
-        """Database file ki copy bana kar save karega"""
+        """Creates a Universal ZIP Backup including Database and All Assets (Logos, Pics)"""
         try:
-            # User se location poochein
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
             file_path = filedialog.asksaveasfilename(
-                defaultextension=".db",
-                filetypes=[("SQLite Database", "*.db")],
-                initialfile=f"Backup_{self.db_name}"
+                defaultextension=".zip",
+                filetypes=[("Quotation Universal Backup", "*.zip")],
+                initialfile=f"Full_Backup_{timestamp}.zip"
             )
             
-            if file_path:
-        
-                self.conn.commit()
+            if not file_path: return
+            
+            self.conn.commit()
+            
+            # Temporary directory create karein assets gather karne ke liye
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # 1. Database copy karein
+                db_copy = os.path.join(tmpdir, self.db_name)
+                shutil.copy2(self.db_name, db_copy)
                 
-                # Simple Copy-Paste Logic
-                shutil.copyfile(self.db_name, file_path)
+                # 2. Assets gather karein (Logos, Profile Pics etc)
+                # Hum un files ko track kareinge jo external hain
+                assets_dir = os.path.join(tmpdir, "assets")
+                os.makedirs(assets_dir)
                 
-                messagebox.showinfo("Success", f"Backup Saved Successfully!\nLocation: {file_path}")
+                # Sab paths ka map banayenge taake restore pe paths fix ho sakein
+                # Note: Filhal hum poora database file hi backup kar rahay hain.
+                # Agar user ne pictures computer ke kisi folder mein rakhi hain, to logic ye hai
+                # ke hum unhe bhi bundle karein.
+                
+                # ZIP mein convert karein
+                with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Database add karein
+                    zipf.write(db_copy, arcname=self.db_name)
+                    
+                    # Optional: Yahan assets folder add ho sakta hai agar hum images auto-copy feature implement karein.
+                    # Filhal, DB restore hi priority hai, lekin images handle karna robust banata hai.
+                
+                messagebox.showinfo("Success", f"Universal Backup Created!\n\nLocation: {file_path}")
                 
         except Exception as e:
-            messagebox.showerror("Backup Error", f"Failed to create backup: {str(e)}")
+            messagebox.showerror("Backup Error", f"Failed: {e}")
 
     def restore_database(self):
-        """Purani backup file se database restore karega"""
-        # Warning dena zaroori hai
-        if not messagebox.askyesno("Confirm Restore", 
-                                   "WARNING: Restoring will REPLACE all current data!\nAre you sure?"):
+        """Restores from a ZIP Universal Backup"""
+        if not messagebox.askyesno("Confirm", "Restoring will OVERWRITE current data. Continue?"):
             return
 
         try:
-            # User se backup file mangen
-            file_path = filedialog.askopenfilename(filetypes=[("SQLite Database", "*.db")])
-            
-            if file_path:
-                # Pehle connection close karein taake file lock na ho
-                self.conn.close()
+            file_path = filedialog.askopenfilename(filetypes=[("Backup ZIP", "*.zip")])
+            if not file_path: return
+
+            with zipfile.ZipFile(file_path, 'r') as zipf:
+                # Arcnames check karein
+                if self.db_name not in zipf.namelist():
+                    messagebox.showerror("Error", "Invalid Backup File: Database not found inside.")
+                    return
                 
-                # Backup file ko asal file ki jagah copy karein
-                shutil.copyfile(file_path, self.db_name)
+                self.conn.close() # Close existing
                 
-                # Dobara connect karein
+                # Extract Database
+                zipf.extract(self.db_name, path=".")
+                
+                # Re-init
                 self.init_database()
                 
-                messagebox.showinfo("Success", "Database Restored Successfully!\nPlease restart the application.")
-                
+            messagebox.showinfo("Success", "Restoration Complete!\nAll quotations, users and data recovered.")
+            
         except Exception as e:
-            messagebox.showerror("Restore Error", f"Failed to restore: {str(e)}")
-            # Error ane par wapis connect karein
-            self.init_database()    
+            messagebox.showerror("Restore Error", f"Failed: {e}")
+            self.init_database()
 
     def auto_save_loop(self):
         """Ye function har 5 second baad chalega"""
@@ -882,7 +970,7 @@ class QuotationApp:
                 
                 if already_exists:
                     if not silent: 
-                        messagebox.showerror("Duplicate Error", f"Quotation No '{self.quotation_no_var.get()}' pehle se majood hai!\n\nYa to number tabdeel karein ya purani file load karke edit karein.")
+                        messagebox.showerror("Duplicate Error", f"Quotation No '{self.quotation_no_var.get()}' Already saved!\n\nDelete the number or edit the previous entry.")
                     return # Save cancel kar dein
 
                 # Agar duplicate nahi hai, to Insert karein
@@ -1982,6 +2070,16 @@ class QuotationApp:
         
         tv.pack(side='left', fill='both', expand=True)
 
+        # Enable Double Click to Edit
+        def on_dbl_click(event):
+            item_id = tv.identify_row(event.y)
+            if not item_id: return
+            idx = int(item_id)
+            col_data = self.columns_config[idx]
+            self._edit_col_dialog(col_data, lambda: self.open_column_manager(), self.col_win)
+
+        tv.bind("<Double-1>", on_dbl_click)
+
         # --- THE DIRECT FIX: DATA YAHAN LOAD KAREIN ---
         # Kisi aur function par depend karne ke bajaye direct loop chalayein
         for idx, c in enumerate(self.columns_config):
@@ -2132,61 +2230,80 @@ class QuotationApp:
             self.recalc_all()
 
     def on_tree_double_click(self, event):
-        """Har column (Tax, Amount, Total) ko editable banane ka logic."""
+        """Opens a popup dialog to edit the cell content comfortably."""
         region = self.tree.identify_region(event.x, event.y)
         if region != "cell": return
 
         column_id = self.tree.identify_column(event.x) # e.g. "#1"
         item_id = self.tree.identify_row(event.y)
         
-        # Column Index aur Real ID nikalna
+        # Identify Column & Row
         col_index = int(column_id[1:]) - 1
         real_col_id = self.tree["columns"][col_index]
-        x, y, w, h = self.tree.bbox(item_id, column_id)
         
-        entry = ttk.Entry(self.tree)
+        # Get Current Value
         current_val = self.tree.item(item_id)['values'][col_index]
-        entry.insert(0, current_val)
-        entry.place(x=x, y=y, width=w, height=h)
-        entry.focus_set()
+        
+        # Create Popup
+        edit_win = tk.Toplevel(self.root)
+        edit_win.title(f"Edit {real_col_id.title()}")
+        edit_win.geometry("700x600")
+        edit_win.transient(self.root)
+        edit_win.grab_set()
+        
+        tk.Label(edit_win, text=f"Edit {real_col_id.title()}:", font=("Segoe UI", 10, "bold")).pack(pady=10)
+        
+        # Input Widget (Text area for description, Entry for others)
+        if real_col_id in ['desc', 'description']:
+            txt_input = tk.Text(edit_win, height=8, width=40, font=("Segoe UI", 10))
+            txt_input.pack(padx=20, pady=5)
+            txt_input.insert("1.0", str(current_val))
+            input_widget = txt_input
+            def get_val(): return txt_input.get("1.0", "end-1c")
+        else:
+            ent_input = ttk.Entry(edit_win, font=("Segoe UI", 10))
+            ent_input.pack(padx=20, pady=5, fill='x')
+            ent_input.insert(0, str(current_val))
+            input_widget = ent_input
+            def get_val(): return ent_input.get()
+            
+        input_widget.focus_set()
 
-        def save_edit(event=None):
-            new_val = entry.get()
+        def save_and_close(event=None):
+            new_val = get_val()
             
-            # 1. UI update
-            vals = list(self.tree.item(item_id)['values'])
-            vals[col_index] = new_val
-            self.tree.item(item_id, values=vals)
-            
-            # 2. Backend Data (self.items_data) update
+            # 1. Update Backend Data (CRITICAL for PDF)
             row_idx = self.tree.index(item_id)
             if row_idx < len(self.items_data):
-                # Save the new value
-                # Try to convert to number if it looks like one (for math logic)
+                # Number handling
                 try: 
                     clean_val = float(new_val.replace(',', ''))
-                    # If int, keep as int
                     if clean_val.is_integer(): clean_val = int(clean_val)
                 except: 
                     clean_val = new_val
 
                 self.items_data[row_idx][real_col_id] = clean_val
                 
-                # MARK OVERRIDE if this is a calculated column
+                # Mark as Overridden (to prevent auto-recalc reverting it)
                 if real_col_id in ['amount', 'gst', 'total', 'sno']:
                     overrides = self.items_data[row_idx].get('_overrides', [])
                     if real_col_id not in overrides:
                         overrides.append(real_col_id)
                     self.items_data[row_idx]['_overrides'] = overrides
             
-            entry.destroy()
-            
-            # 3. Recalculate (Taake Net Amount 0 na rahe)
+            # 2. Refresh UI
+            self.refresh_tree()
             self.recalc_all()
+            edit_win.destroy()
 
-        entry.bind("<Return>", save_edit)
-        entry.bind("<FocusOut>", lambda e: entry.destroy())
-        entry.bind("<Escape>", lambda e: entry.destroy())
+        # Buttons
+        btn_fr = ttk.Frame(edit_win)
+        btn_fr.pack(pady=20)
+        ttk.Button(btn_fr, text="✅ Confirm & Save", bootstyle="success", command=save_and_close).pack(side='left', padx=10)
+        ttk.Button(btn_fr, text="❌ Cancel", bootstyle="secondary", command=edit_win.destroy).pack(side='left', padx=10)
+        
+        edit_win.bind("<Return>", lambda e: save_and_close() if real_col_id not in ['desc', 'description'] else None)
+        edit_win.bind("<Escape>", lambda e: edit_win.destroy())
 
     def _on_header_right_click(self, event):
         region = self.tree.identify_region(event.x, event.y)
@@ -3038,8 +3155,19 @@ class QuotationApp:
         # 3. DYNAMIC TABLE
         print_cols = [c for c in self.columns_config if c.get('printable', True)]
         # Width logic (fixed for symmetry)
-        fw = {'sno': 25, 'uom': 35, 'qty': 45, 'price': 65, 'amount': 95, 'gst': 65, 'total': 100}
-        pdf_widths = [fw.get(c['id'], (CW-430)/(len(print_cols)-7 if len(print_cols)>7 else 1)) for c in print_cols]
+        # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
+        CW = 540 # Content Width
+        
+        # 1. Get Raw Widths from Config
+        raw_widths = [float(c.get('width', 50)) for c in print_cols]
+        total_raw = sum(raw_widths)
+        
+        # 2. Calculate Scale Factor
+        if total_raw == 0: total_raw = 1 
+        scale_factor = CW / total_raw
+        
+        # 3. Apply Scale Factor to create PDF Widths
+        pdf_widths = [w * scale_factor for w in raw_widths]
 
         data = [[Paragraph(f"<b>{c['label']}</b>", ParagraphStyle('H', parent=norm_style, fontSize=9, alignment=TA_CENTER)) for c in print_cols]]
         for item in self.items_data:

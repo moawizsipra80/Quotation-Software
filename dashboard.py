@@ -48,7 +48,9 @@ class DashboardPanel:
         # Data fetching...
         try:
             self.monthly_data = analytics.get_analytics_data(self.app.conn)
-        except: self.monthly_data = None
+        except Exception as e:
+            print(f"Error fetching monthly data: {e}")
+            self.monthly_data = None
 
         self._build_ui()
 
@@ -176,6 +178,215 @@ class DashboardPanel:
 
         tk.Button(sw, text="🚀 START BOT", bg="#E1306C", fg="white", font=("bold"), 
                   command=start_process).pack(pady=20, ipadx=20, ipady=5)  
+
+    def open_edit_profile_dialog(self):
+        ed = tk.Toplevel(self.root)
+        ed.title("Edit Profile")
+        ed.geometry("550x650") # Increased height for tabs
+        ed.transient(self.root)
+        
+        tk.Label(ed, text="Update Profile", font=("Segoe UI", 16, "bold"), fg="#2c3e50").pack(pady=15)
+        
+        # Tabs
+        notebook = ttk.Notebook(ed)
+        notebook.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Tab 1: Basic Info
+        tab1 = ttk.Frame(notebook, padding=20)
+        notebook.add(tab1, text="Basic Info")
+        
+        # Tab 2: Security
+        tab2 = ttk.Frame(notebook, padding=20)
+        notebook.add(tab2, text="Security Questions")
+
+        current_u = getattr(self.app, 'current_username', '')
+        
+        # Fetch current data
+        c_name = ""
+        c_pic = getattr(self.app, 'current_user_pic_path', '')
+        c_qs = ["", "", "", "", "", ""] # q1, a1... a3
+        
+        try:
+            self.app.cursor.execute("SELECT full_name, q1, a1, q2, a2, q3, a3 FROM users WHERE username=?", (current_u,))
+            r = self.app.cursor.fetchone()
+            if r: 
+                c_name = r[0] if r[0] else ""
+                c_qs = [x if x else "" for x in r[1:]] # Replace None with ""
+        except: pass
+        
+        # --- TAB 1 CONTENT ---
+        ttk.Label(tab1, text="Full Name:").pack(anchor='w')
+        e_name = ttk.Entry(tab1, width=40)
+        e_name.pack(pady=5, fill='x')
+        e_name.insert(0, c_name)
+        
+        ttk.Label(tab1, text="Profile Picture:").pack(anchor='w', pady=(15,5))
+        
+        pic_frame = ttk.Frame(tab1)
+        pic_frame.pack(fill='x', pady=5)
+
+        self.new_pic_path = c_pic
+        
+        # Preview Label
+        lbl_preview = ttk.Label(pic_frame, text="No Image", background="#ecf0f1", anchor="center", font=("Arial", 9), width=15)
+        lbl_preview.pack(side='left', padx=(0, 10))
+        
+        # Try load specific existing image
+        if c_pic and os.path.exists(c_pic):
+            try:
+                raw = Image.open(c_pic).resize((80, 80), Image.Resampling.LANCZOS)
+                self.edit_preview_icon = ImageTk.PhotoImage(raw)
+                lbl_preview.config(image=self.edit_preview_icon, text="")
+            except: pass
+
+        # Buttons Frame
+        btns_frame = ttk.Frame(pic_frame)
+        btns_frame.pack(side='left', fill='y', padx=5)
+
+        self.pending_photo_path = None 
+
+        def pick_new():
+            p = filedialog.askopenfilename(parent=ed, filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+            if p:
+                self.pending_photo_path = p
+                self.new_pic_path = p 
+                try:
+                    raw = Image.open(p).resize((80, 80), Image.Resampling.LANCZOS)
+                    self.edit_preview_icon = ImageTk.PhotoImage(raw)
+                    lbl_preview.config(image=self.edit_preview_icon, text="")
+                    
+                    # Enable Confirm
+                    btn_confirm_pic.config(state='normal', bootstyle="success")
+                except:
+                    pass
+
+        def confirm_photo_upload():
+            if self.pending_photo_path:
+                try:
+                    # Save to DB
+                    self.app.cursor.execute("UPDATE users SET profile_pic_path=? WHERE username=?", (self.pending_photo_path, current_u))
+                    self.app.conn.commit()
+                    
+                    # Update State
+                    self.app.current_user_pic_path = self.pending_photo_path
+                    
+                    # Update Sidebar Immediately
+                    self.update_sidebar_profile()
+                    
+                    btn_confirm_pic.config(text="✅ Uploaded", state='disabled')
+                    messagebox.showinfo("Photo Updated", "Profile picture updated successfully!", parent=ed)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Update failed: {e}", parent=ed)
+
+        ttk.Button(btns_frame, text="📂 Browse Image...", command=pick_new).pack(fill='x', pady=(0, 5))
+        
+        btn_confirm_pic = ttk.Button(btns_frame, text="⬆ Confirm Upload", command=confirm_photo_upload, state='disabled', bootstyle="secondary")
+        btn_confirm_pic.pack(fill='x')
+
+        # --- TAB 2 CONTENT ---
+        # Helper to make question rows
+        entries_q = []
+        entries_a = []
+        
+        def make_qa_row(parent, idx, label_text, q_val, a_val):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=5)
+            
+            ttk.Label(f, text=label_text, font=("bold")).pack(anchor='w')
+            qe = ttk.Entry(f, width=50)
+            qe.pack(fill='x', pady=2)
+            qe.insert(0, q_val)
+            entries_q.append(qe)
+            
+            ttk.Label(f, text=f"Answer {idx}:", font=("Arial", 8), foreground="grey").pack(anchor='w')
+            ae = ttk.Entry(f, width=50)
+            ae.pack(fill='x', pady=(0, 10))
+            ae.insert(0, a_val)
+            entries_a.append(ae)
+
+        make_qa_row(tab2, 1, "Question 1:", c_qs[0], c_qs[1])
+        make_qa_row(tab2, 2, "Question 2:", c_qs[2], c_qs[3])
+        make_qa_row(tab2, 3, "Question 3:", c_qs[4], c_qs[5])
+
+        # SAVE BUTTON (Bottom)
+        btn_area = ttk.Frame(ed, padding=20)
+        btn_area.pack(fill='x', side='bottom')
+
+        def save_changes():
+            new_n = e_name.get().strip()
+            # Get QAs
+            q1, a1 = entries_q[0].get().strip(), entries_a[0].get().strip()
+            q2, a2 = entries_q[1].get().strip(), entries_a[1].get().strip()
+            q3, a3 = entries_q[2].get().strip(), entries_a[2].get().strip()
+
+            if not new_n:
+                messagebox.showwarning("Input", "Name cannot be empty", parent=ed)
+                return
+            
+            # Ensure at least 3 questions if they are changing them? 
+            # User might want to keep some empty if logic allows, but setup forced them.
+            # Let's enforce non-empty if they are editing specifically.
+            if not (q1 and a1 and q2 and a2 and q3 and a3):
+                 messagebox.showwarning("Incomplete", "All 3 Security Questions & Answers must be filled.", parent=ed)
+                 return
+            
+            try:
+                 query = "UPDATE users SET full_name=?, profile_pic_path=?, q1=?, a1=?, q2=?, a2=?, q3=?, a3=? WHERE username=?"
+                 params = (new_n, self.new_pic_path, q1, a1, q2, a2, q3, a3, current_u)
+                 
+                 self.app.cursor.execute(query, params)
+                 self.app.conn.commit()
+                 
+                 # Update App State
+                 self.app.current_user_pic_path = self.new_pic_path
+                 
+                 messagebox.showinfo("Success", "Profile Updated Successfully!", parent=ed)
+                 ed.destroy()
+                 
+                 # Rebuild Dashboard UI to show changes
+                 self.close_dashboard()
+                 from dashboard import DashboardPanel
+                 self.app.current_dashboard = DashboardPanel(self.app)
+                 
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=ed)
+
+        ttk.Button(btn_area, text="💾 SAVE CHANGES", command=save_changes, style="success.TButton").pack(fill='x', ipady=5)  
+    def update_sidebar_profile(self):
+        """Loads and applies a circular mask to the user's profile picture for the sidebar."""
+        p_path = getattr(self.app, 'current_user_pic_path', None)
+        
+        # Default Icon (Text Based)
+        def set_default():
+            self.sidebar_profile_lbl.config(text="👤", fg="white", font=("Arial", 16), image="")
+        
+        if p_path and os.path.exists(p_path):
+            try:
+                # Open and Resize
+                pil_img = Image.open(p_path).convert("RGBA")
+                size = (40, 40)
+                pil_img = pil_img.resize(size, Image.Resampling.LANCZOS)
+                
+                # Create Circular Mask
+                mask = Image.new("L", size, 0)
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(mask)
+                draw.ellipse((0, 0, size[0], size[1]), fill=255)
+                
+                # Apply Mask
+                output = Image.new("RGBA", size, (0, 0, 0, 0))
+                output.paste(pil_img, (0, 0), mask=mask)
+                
+                self.sidebar_icon = ImageTk.PhotoImage(output)
+                self.sidebar_profile_lbl.config(image=self.sidebar_icon, text="")
+                
+                print(f"✅ Loaded Sidebar Image: {p_path}")
+            except Exception as e:
+                print(f"❌ Sidebar Image Error: {e}")
+                set_default()
+        else:
+            set_default()
+
     def _build_ui(self):
         # Stats Calculation
         total_count = 0; total_value = 0.0
@@ -227,7 +438,39 @@ class DashboardPanel:
         self._make_menu_btn(left_panel, "⚙️ Settings / Backup", self.open_settings_window)
 
         # Version Footer
-        tk.Label(left_panel, text="v5.2 Stable", fg="#7f8c8d", bg="#2c3e50", font=("Arial", 8)).pack(side="bottom", pady=20)
+        tk.Label(left_panel, text="v5.2 Stable", fg="#7f8c8d", bg="#2c3e50", font=("Arial", 8)).pack(side="bottom", pady=10)
+
+        # --- PROFILE SECTION (LEFT BOTTOM) ---
+        profile_frame = tk.Frame(left_panel, bg="#243447", pady=10)
+        profile_frame.pack(side="bottom", fill="x", padx=0) # Pack above version
+
+        # Fetch Full Name
+        full_name = user
+        try:
+             self.app.cursor.execute("SELECT full_name FROM users WHERE username=?", (user,))
+             res = self.app.cursor.fetchone()
+             if res and res[0]: full_name = res[0]
+        except: pass
+
+        # Profile Image
+        pf_pic_lbl = tk.Label(profile_frame, bg="#243447")
+        pf_pic_lbl.pack(side="left", padx=(15, 10))
+        
+        # Default/Custom Image Logic
+        self.sidebar_profile_lbl = pf_pic_lbl # Keep reference
+        self.update_sidebar_profile()
+
+        # Name & Edit Button Container
+        nf = tk.Frame(profile_frame, bg="#243447")
+        nf.pack(side="left", fill="both", expand=True)
+
+        tk.Label(nf, text=full_name, font=("Segoe UI", 9, "bold"), fg="white", bg="#243447", anchor="w").pack(fill="x")
+        
+        # Edit Button (Small text link style)
+        lbl_edit = tk.Label(nf, text="Edit Profile", font=("Segoe UI", 7, "underline"), fg="#3498db", bg="#243447", cursor="hand2")
+        lbl_edit.pack(anchor="w")
+        lbl_edit.bind("<Button-1>", lambda e: self.open_edit_profile_dialog())
+
 
         # 1. Header Area
         header = tk.Frame(right_panel, bg="#f4f6f9", height=80)
@@ -1017,21 +1260,21 @@ class DashboardPanel:
 
         tk.Button(
             btn_fr,
-            text="💾 Auto Backup (1-Click)",
+            text="💾 Universal Backup (ZIP)",
             bg="#27ae60",
             fg="white",
             font=("bold"),
             width=22,
-            command=perform_backup,
+            command=self.app.backup_database,
         ).pack(pady=2)
         tk.Button(
             btn_fr,
-            text="♻ Restore from Backup",
+            text="♻ Restore ZIP Backup",
             bg="#e67e22",
             fg="white",
             font=("bold"),
             width=22,
-            command=perform_restore,
+            command=self.app.restore_database,
         ).pack(pady=4)
 
         # --- RIGHT COLUMN: License / Premium Info ---

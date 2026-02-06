@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import datetime
 import sqlite3
-import pyodbc
+import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
@@ -78,6 +78,13 @@ class CommercialApp(QuotationApp):
         if hasattr(self, 'tree'):
             self.tree.bind("<Double-1>", self.on_tree_double_click)
 
+        # ✅ Override Default Column Widths for Commercial Invoice (PDF Optimized)
+        # These match the "balanced" values: SNo:25, UOM:40, Qty:35, Price:65, Amount:75, GST:55, Total:85, Desc:115
+        opt_widths = {'sno': 25, 'uom': 40, 'qty': 35, 'price': 65, 'amount': 75, 'gst': 55, 'total': 85, 'desc': 115}
+        for col in self.columns_config:
+            if col['id'] in opt_widths:
+                col['width'] = opt_widths[col['id']]
+
     #LOAD LOGO FUNCTION
     def load_logo(self, which):
         try:
@@ -129,21 +136,11 @@ class CommercialApp(QuotationApp):
 
     # --- Database ---
     def init_database(self):
-        # Server Config
-        server_name = r'.\SQLEXPRESS'  
-        database_name = 'QuotationDB'
-
         try:
-            conn_str = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={server_name};'
-                f'DATABASE={database_name};'
-                'Trusted_Connection=yes;'
-                'TrustServerCertificate=yes;'
-            )
-            self.conn = pyodbc.connect(conn_str)
+            db_name = "QuotationManager_Final.db"
+            self.conn = sqlite3.connect(db_name)
             self.cursor = self.conn.cursor()
-            print(f"✅ Commercial App Connected to SQL Server")
+            print(f"✅ Commercial App Connected to SQLite")
         except Exception as e:
             messagebox.showerror("Database Error", f"SQL Server Connection Failed:\n{e}")
 
@@ -488,41 +485,31 @@ class CommercialApp(QuotationApp):
             headers.append(Paragraph(f"<b>{lbl}</b>", item_head_style))
         
         # Add the spare column header if needed
-        headers.append(Paragraph("", item_head_style))
+        # headers.append(Paragraph("", item_head_style)) # REMOVED SPARE
         
         data = [headers]
         total_tax_calc = 0.0
 
-        # FIXED-FLEX COLUMN WIDTH LOGIC
-        CW = 540 # Total Content Width
-        fixed_widths = {'sno': 30, 'uom': 40, 'qty': 55, 'price': 70, 'amount': 95, 'gst': 70, 'total': 100}
+        # DYNAMIC COLUMN WIDTH LOGIC
+        # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
+        # Treats user-defined widths as 'weights' and scales them to fit exactly 540pts.
+        # This ensures perfect symmetry: adding a column shrinks others proportionally.
+        CW = 540 # Total Page Content Width
         
-        # Special handling: leave space for the 'spare' column (0.6 inch = 43.2 points)
-        SPARE_W = 43.2
-        usable_cw = CW - SPARE_W
+        # 1. Get Raw Widths from Config
+        raw_widths = [float(c.get('width', 50)) for c in print_cols]
+        total_raw = sum(raw_widths)
         
-        pdf_col_widths = []
-        flex_indices = []
-        used_fixed_width = 0
+        # 2. Calculate Scale Factor
+        # Avoid division by zero
+        if total_raw == 0: total_raw = 1 
+        scale_factor = CW / total_raw
         
-        for idx, c in enumerate(print_cols):
-            if c['id'] in fixed_widths:
-                w = fixed_widths[c['id']]
-                pdf_col_widths.append(w)
-                used_fixed_width += w
-            else:
-                pdf_col_widths.append(None) # Placeholder
-                flex_indices.append(idx)
-        
-        # Allocate remaining space to flexible columns (Description, etc.)
-        if flex_indices:
-            remaining_space = usable_cw - used_fixed_width
-            share = remaining_space / len(flex_indices)
-            for i in flex_indices:
-                pdf_col_widths[i] = share
-        
-        # Add the spare column width
-        pdf_col_widths.append(SPARE_W)
+        # 3. Apply Scale Factor
+        pdf_col_widths = [w * scale_factor for w in raw_widths]
+            
+        # Add the spare column width (Removed)
+        # pdf_col_widths.append(SPARE_W) # REMOVED SPARE
         
         for item in self.items_data:
             total_tax_calc += item.get('gst', 0.0)
@@ -537,12 +524,12 @@ class CommercialApp(QuotationApp):
                     except: pass
                 row.append(Paragraph(str(val).replace("\n", "<br/>"), p_style))
             
-            row.append("") # Spare empty cell
+            # row.append("") # Spare empty cell - REMOVED
             data.append(row)
         
         t_items = Table(data, colWidths=pdf_col_widths, repeatRows=1, splitByRow=True)
         t_items.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-2), 0.5, colors.black),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BOX', (0,0), (-1,-1), 1, colors.black),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
@@ -800,12 +787,10 @@ class CommercialApp(QuotationApp):
                     VALUES (?,?,?,?,?)
                 """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), gt, full_data))
                 
-                self.cursor.execute("SELECT SCOPE_IDENTITY();")
-                row = self.cursor.fetchone()
-                if row and row[0]: self.current_db_id = int(row[0])
+                self.current_db_id = self.cursor.lastrowid
 
             self.conn.commit()
-            if not silent: messagebox.showinfo("Saved", "Commercial Invoice Saved to SQL Server!")
+            if not silent: messagebox.showinfo("Saved", "Commercial Invoice Saved to SQLite!")
         except Exception as e: 
             if not silent: messagebox.showerror("Error", str(e))
     def load_from_quotation_data(self, json_data):

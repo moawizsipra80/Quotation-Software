@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import json
 import datetime
 # import sqlite3
-import pyodbc
+import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
@@ -123,32 +123,22 @@ class DeliveryChallanApp(QuotationApp):
         # Enable all-column editing via parent's comprehensive method
         if hasattr(self, 'tree'):
             self.tree.bind("<Double-1>", self.on_tree_double_click)
+            
+        self._init_default_widths()
+
+    def _init_default_widths(self):
+        # ✅ Override Default Column Widths for Delivery Challan (PDF Optimized)
+        # Optimized balance for Challan layout.
+        opt_widths = {'sno': 25, 'uom': 35, 'qty': 40, 'price': 60, 'amount': 70, 'gst': 50, 'total': 80, 'desc': 220}
+        for col in self.columns_config:
+            if col['id'] in opt_widths:
+                col['width'] = opt_widths[col['id']]
 
     def load_from_quotation_data(self, json_str):
         try:
             data = json.loads(json_str)
-            h = data.get("header", {})
-            self.client_name_var.set(h.get("client_name", ""))
-            self.client_addr_var.set(h.get("client_addr", ""))
-            self.client_contact_var.set(h.get("client_contact", ""))
-            self.client_email_var.set(h.get("client_email", ""))
-            self.rfq_no_var.set(h.get("rfq", ""))
-            self.ref_quot_no_var.set(h.get("quot_no", ""))
-            self.dc_no_var.set("DC-NEW") 
             
-            self.items_data = data.get("items", [])
-            self.row_colors = {int(k): v for k, v in data.get("colors", {}).items()}
-            
-            self.refresh_tree()
-            if hasattr(self, 'total_lbl'): self.recalc_all()
-        except Exception as e:
-            messagebox.showerror("Load Error", f"Failed: {e}")
-    
-    def load_from_quotation_data(self, json_str):
-        try:
-            data = json.loads(json_str)
-            
-            # 1. Header Data Restore
+            # Restore Header Data
             h = data.get("header", {})
             self.client_name_var.set(h.get("client_name", ""))
             self.client_addr_var.set(h.get("client_addr", ""))
@@ -157,27 +147,20 @@ class DeliveryChallanApp(QuotationApp):
             self.client_designation_var.set(h.get("client_desig", ""))
             self.rfq_no_var.set(h.get("rfq", ""))
             
-            # Quotation No ko 'Ref Quote' mein dalen
+            # Map Quotation No to Ref Quote
             self.ref_quot_no_var.set(h.get("quot_no", ""))
-            
-            # Naya DC No set karein
             self.dc_no_var.set("DC-NEW") 
             
-            # 2. Items Restore
+            # Restore Items & Colors
             self.items_data = data.get("items", [])
-            
-            # 3. Colors Restore
             self.row_colors = {int(k): v for k, v in data.get("colors", {}).items()}
             
-            # UI Refresh
             self.refresh_tree()
-            
-            # Crash check ke sath recalc
             if hasattr(self, 'total_lbl'):
                 self.recalc_all()
                 
         except Exception as e:
-            messagebox.showerror("Load Error", f"Failed to load quotation data: {e}")
+            messagebox.showerror("Load Error", f"Failed to restore data: {e}")
 
 
     # ✅ LOAD LOGO FUNCTION
@@ -857,7 +840,7 @@ class DeliveryChallanApp(QuotationApp):
         def mk_n(txt): return Paragraph(f"{txt}", ParagraphStyle('n', parent=norm_style, fontSize=9))
         title_b = ParagraphStyle('tb', parent=norm_style, fontSize=10, alignment=TA_CENTER, fontName='Helvetica-Bold')
 
-        l_widths = [0.8*inch, 1.6*inch, 0.9*inch, 1.5*inch]
+        l_widths = [60, 115, 65, 105] # Sum = 345
         l_rows = [
             [Paragraph(self.left_header_title.get(), title_b), "", "", ""],
             [mk_b("DC No:"), mk_n(self.quotation_no_var.get()), mk_b("PO No."), mk_n(self.rfq_no_var.get())],
@@ -870,12 +853,12 @@ class DeliveryChallanApp(QuotationApp):
         t_left = Table(l_rows, colWidths=l_widths)
         t_left.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
 
-        r_widths = [0.9*inch, 1.7*inch]
+        r_widths = [70, 125] # Sum = 195. Total 345 + 195 = 540 (CW)
         r_rows = [[Paragraph(self.right_header_title.get(), title_b), ""], [mk_b("Quotation No."), mk_n(self.ref_quot_no_var.get())], [mk_b("DC No"), mk_n(self.dc_no_var.get())], [mk_b("S.T.N. No."), mk_n(self.vendor_stn_var.get())], [mk_b("NTN:"), mk_n(self.vendor_ntn_var.get())], [mk_b("PRA:"), mk_n(self.vendor_pra_var.get())], [mk_b("email:"), mk_n(self.vendor_email_var.get())]]
         t_right = Table(r_rows, colWidths=r_widths)
         t_right.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
 
-        elements.append(Table([[t_left, t_right]], colWidths=[4.8*inch, 2.6*inch], style=[('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        elements.append(Table([[t_left, t_right]], colWidths=[345, 195], style=[('VALIGN', (0,0), (-1,-1), 'TOP')]))
         elements.append(Spacer(1, 15))
 
         # --- 5. ITEMS TABLE ---
@@ -895,7 +878,21 @@ class DeliveryChallanApp(QuotationApp):
             data.append(row)
         
         if len(print_cols) > 0:
-            t_items = Table(data, colWidths=[(7.4*inch)/len(print_cols)]*len(print_cols), repeatRows=1)
+            # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
+            CW = 540 # Total Page Content Width (7.5 inch approx)
+            
+            # 1. Get Raw Widths from Config
+            raw_widths = [float(c.get('width', 50)) for c in print_cols]
+            total_raw = sum(raw_widths)
+            
+            # 2. Calculate Scale Factor
+            if total_raw == 0: total_raw = 1 
+            scale_factor = CW / total_raw
+            
+            # 3. Apply Scale Factor to create PDF Widths
+            pdf_col_widths = [w * scale_factor for w in raw_widths]
+            
+            t_items = Table(data, colWidths=pdf_col_widths, repeatRows=1)
             t_items.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.black), 
                 ('BACKGROUND', (0,0), (-1,0), colors.lightgrey), 
@@ -906,7 +903,10 @@ class DeliveryChallanApp(QuotationApp):
             elements.append(t_items)
         
         grand = self.total_lbl.cget("text").split("Net Amount:")[1].strip() if "Net Amount:" in self.total_lbl.cget("text") else "0.00"
-        elements.append(Table([[Paragraph("<b>Net Amount (PKR):</b>", item_num), Paragraph(f"<b>{grand}</b>", item_num)]], colWidths=[6.0*inch, 1.4*inch], style=[('ALIGN', (0,0), (-1,-1), 'RIGHT'), ('LINEABOVE', (1,0), (1,0), 1, colors.black)]))
+        # 540 Total (CW) for symmetry: 420 + 120 = 540
+        elements.append(Table([[Paragraph("<b>Net Amount (PKR):</b>", item_num), Paragraph(f"<b>{grand}</b>", item_num)]], 
+                              colWidths=[420, 120], 
+                              style=[('ALIGN', (0,0), (-1,-1), 'RIGHT'), ('LINEABOVE', (1,0), (1,0), 1, colors.black)]))
         elements.append(Spacer(1, 15))
 
         # ✅ 6. TRANSPORT & SIGNATURES (SPECIAL MODE FIX & TICK MARK)
@@ -1023,12 +1023,10 @@ class DeliveryChallanApp(QuotationApp):
             else:
                 self.cursor.execute("""
                     INSERT INTO delivery_challans (ref_no, client_name, date, grand_total, full_data)
-                    OUTPUT INSERTED.ID
                     VALUES (?,?,?,?,?)
                 """, (self.dc_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str))
                 
-                row = self.cursor.fetchone()
-                if row: self.current_db_id = int(row[0])
+                self.current_db_id = self.cursor.lastrowid
             
             self.conn.commit()
             if not silent: messagebox.showinfo("Saved", "Challan Database Updated!")
@@ -1064,19 +1062,9 @@ class DeliveryChallanApp(QuotationApp):
         
         # 3. SQL Server se Data Lao
         try:
-            # Wahi connection string jo aap use kar rahe hain
-            server_name = r'.\SQLEXPRESS'  
-            database_name = 'QuotationDB'
-            
-            conn_str = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={server_name};'
-                f'DATABASE={database_name};'
-                'Trusted_Connection=yes;'
-                'TrustServerCertificate=yes;'
-            )
-            
-            conn = pyodbc.connect(conn_str)
+            # Connect to SQLite
+            db_name = "QuotationManager_Final.db"
+            conn = sqlite3.connect(db_name)
             cursor = conn.cursor()
             
             # ✅ COLUMN FIX: Table ke hisaab se column name chuno
@@ -1100,7 +1088,7 @@ class DeliveryChallanApp(QuotationApp):
             conn.close()
             
         except Exception as e:
-            messagebox.showerror("DB Error", f"Could not fetch data.\nMake sure '{table_name}' exists in SQL Server.\n\nError: {e}")
+            messagebox.showerror("DB Error", f"Could not fetch data.\nMake sure '{table_name}' exists in SQLite.\n\nError: {e}")
             top.destroy()
             return
 
@@ -1117,33 +1105,13 @@ class DeliveryChallanApp(QuotationApp):
 
         ttk.Button(top, text="Import/Load Selected Data", command=on_select).pack(pady=10)
 
-        # 4. Select Button Logic
-        def on_select():
-            sel = tree.selection()
-            if not sel: return
-            item = tree.item(sel[0])
-            selected_id = item['values'][0]
-            
-            # Data Load function call karein
-            self.load_invoice_by_id(table_name, selected_id)
-            top.destroy()
 
-        ttk.Button(top, text="Import Selected Invoice Data", command=on_select).pack(pady=10)
 
     def load_invoice_by_id(self, table_name, inv_id):
-        """ID ke zariye SQL Server se full JSON data fetch karke form fill karta hai."""
+        """ID ke zariye SQLite se full JSON data fetch karke form fill karta hai."""
         try:
-            server_name = r'.\SQLEXPRESS'
-            database_name = 'QuotationDB'
-            conn_str = (
-                f'DRIVER={{ODBC Driver 17 for SQL Server}};'
-                f'SERVER={server_name};'
-                f'DATABASE={database_name};'
-                'Trusted_Connection=yes;'
-                'TrustServerCertificate=yes;'
-            )
-            
-            conn = pyodbc.connect(conn_str)
+            db_name = "QuotationManager_Final.db"
+            conn = sqlite3.connect(db_name)
             cursor = conn.cursor()
             
             # Query
