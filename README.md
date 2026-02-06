@@ -1,4 +1,4 @@
-# Quotation Software V5.3
+# Quotation Software 
 
 ## Overview
 This is a professional Quotation management software designed to streamline the process of generating financial documents and managing client relationships. It includes a modern dashboard, comprehensive document generation tools, and integrated marketing bots.
