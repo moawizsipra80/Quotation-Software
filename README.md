@@ -1,4 +1,4 @@
-# Quotation Software V5.2
+# Quotation Software V5.3
 
 ## Overview
 This is a professional Quotation management software designed to streamline the process of generating financial documents and managing client relationships. It includes a modern dashboard, comprehensive document generation tools, and integrated marketing bots.
@@ -8,7 +8,7 @@ This is a professional Quotation management software designed to streamline the 
   - Quotations
   - Tax Invoices
   - Commercial Invoices
-  - Delivery Challans
+  - Delivery Challans (with auto-generated signature notes)
 - **Dashboard & Analytics**: 
   - Real-time sales performance graphs.
   - Monthly sales summaries.
@@ -21,6 +21,8 @@ This is a professional Quotation management software designed to streamline the 
   - **Instagram Lead Miner**: Automated DM bot to reach potential clients.
 - **Security & User Management**:
   - Secure Login System with "Remember Me" functionality.
+  - **Enhanced**: Full-screen login and setup interface.
+  - **New**: Profile picture upload for user accounts.
   - Password recovery via security question.
   - Role-based access (Admin/User).
 - **Customization**:
