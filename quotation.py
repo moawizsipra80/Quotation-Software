@@ -322,51 +322,102 @@ class QuotationApp:
     def perform_setup(self):
         self.root.withdraw()
         setup_win = tk.Toplevel(self.root)
-        setup_win.title("First Time Setup")
-        setup_win.geometry("700x800")
+        setup_win.title("First Time Setup - Create Profile")
+        setup_win.state('zoomed') # Full Window
         setup_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit()) 
         
-        tk.Label(setup_win, text="Welcome! Setup Your Profile", font=("Segoe UI", 16, "bold")).pack(pady=20)
-        
-        f = tk.Frame(setup_win); f.pack(pady=10)
+        main_fr = ttk.Frame(setup_win, padding=40)
+        main_fr.pack(fill='both', expand=True, anchor='center')
 
-        tk.Label(f, text="Full Name:").pack(anchor='w')
-        name_ent = ttk.Entry(f, width=40); name_ent.pack(pady=5)
-        
-        tk.Label(f, text="Set Username:").pack(anchor='w')
-        user_ent = ttk.Entry(f, width=40); user_ent.pack(pady=5)
-        
-        tk.Label(f, text="Set Password:").pack(anchor='w')
-        pass_ent = ttk.Entry(f, width=40, show="*"); pass_ent.pack(pady=5)
+        # Title
+        tk.Label(main_fr, text="Welcome! Let's Setup Your Profile", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(20, 30))
 
-        # --- SECURITY QUESTION ---
-        tk.Label(f, text="Security Question (For Password Reset):", fg="red", font=("bold")).pack(anchor='w', pady=(15,0))
-        tk.Label(f, text="What is your Father's Name?").pack(anchor='w')
-        sec_ent = ttk.Entry(f, width=40)
-        sec_ent.pack(pady=5)
+        # Container for Columns
+        cols_frame = ttk.Frame(main_fr)
+        cols_frame.pack(fill='both', expand=True)
+
+        # Left Column: Basic Info
+        left_col = ttk.Labelframe(cols_frame, text="User Credentials", padding=15, bootstyle="info")
+        left_col.pack(side='left', fill='both', expand=True, padx=10)
+
+        ttk.Label(left_col, text="Full Name:").pack(anchor='w')
+        name_ent = ttk.Entry(left_col, width=40); name_ent.pack(pady=5, fill='x')
+        
+        ttk.Label(left_col, text="Set Username:").pack(anchor='w')
+        user_ent = ttk.Entry(left_col, width=40); user_ent.pack(pady=5, fill='x')
+        
+        ttk.Label(left_col, text="Set Password:").pack(anchor='w')
+        pass_ent = ttk.Entry(left_col, width=40, show="*"); pass_ent.pack(pady=5, fill='x')
+
+        # Profile Picture
+        self.setup_pic_path = None
+        def choose_pic():
+            p = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+            if p:
+                self.setup_pic_path = p
+                btn_pic.config(text=f"Selected: {os.path.basename(p)}")
+        
+        ttk.Label(left_col, text="Profile Picture:").pack(anchor='w', pady=(15, 5))
+        btn_pic = ttk.Button(left_col, text="Upload Photo", command=choose_pic, bootstyle="secondary-outline")
+        btn_pic.pack(fill='x')
+
+
+        # Right Column: Security Questions
+        right_col = ttk.Labelframe(cols_frame, text="Security Recovery (Create 3 Questions)", padding=15, bootstyle="warning")
+        right_col.pack(side='right', fill='both', expand=True, padx=10)
+
+        # Q1
+        ttk.Label(right_col, text="Question 1:").pack(anchor='w')
+        q1_ent = ttk.Entry(right_col, width=40); q1_ent.pack(fill='x', pady=(0, 2))
+        ttk.Label(right_col, text="Answer 1:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
+        a1_ent = ttk.Entry(right_col, width=40); a1_ent.pack(fill='x', pady=(0, 10))
+
+        # Q2
+        ttk.Label(right_col, text="Question 2:").pack(anchor='w')
+        q2_ent = ttk.Entry(right_col, width=40); q2_ent.pack(fill='x', pady=(0, 2))
+        ttk.Label(right_col, text="Answer 2:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
+        a2_ent = ttk.Entry(right_col, width=40); a2_ent.pack(fill='x', pady=(0, 10))
+
+        # Q3
+        ttk.Label(right_col, text="Question 3:").pack(anchor='w')
+        q3_ent = ttk.Entry(right_col, width=40); q3_ent.pack(fill='x', pady=(0, 2))
+        ttk.Label(right_col, text="Answer 3:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
+        a3_ent = ttk.Entry(right_col, width=40); a3_ent.pack(fill='x', pady=(0, 10))
+
         
         def save_user():
             # Strip extra spaces
             full_name = name_ent.get().strip()
             username = user_ent.get().strip()
             password = pass_ent.get().strip()
-            security_ans = sec_ent.get().strip() 
             
-            if full_name and username and password and security_ans:
-                try:
-                    # is_premium default 0 jayega
-                    self.cursor.execute("INSERT INTO users (full_name, username, password, security_answer, is_premium) VALUES (?, ?, ?, ?, 0)", 
-                                        (full_name, username, password, security_ans))
-                    self.conn.commit()
-                    messagebox.showinfo("Success", "Setup Complete!", parent=setup_win)
-                    setup_win.destroy()
-                    self.perform_login(None) 
-                except Exception as e:
-                    messagebox.showerror("Error", f"Error: {e}", parent=setup_win)
-            else:
-                messagebox.showwarning("Input", "All fields are required!", parent=setup_win)
+            # Security
+            q1, a1 = q1_ent.get().strip(), a1_ent.get().strip()
+            q2, a2 = q2_ent.get().strip(), a2_ent.get().strip()
+            q3, a3 = q3_ent.get().strip(), a3_ent.get().strip()
 
-        ttk.Button(setup_win, text="Save & Start", command=save_user, style="success.TButton").pack(pady=30)
+            if not (full_name and username and password and q1 and a1 and q2 and a2 and q3 and a3):
+                messagebox.showwarning("Input", "All fields (Credentials & 3 Q/A) are required!", parent=setup_win)
+                return
+
+            try:
+                # Save to DB
+                self.cursor.execute("""
+                    INSERT INTO users (full_name, username, password, q1, a1, q2, a2, q3, a3, profile_pic_path, is_premium)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                """, (full_name, username, password, q1, a1, q2, a2, q3, a3, self.setup_pic_path))
+                
+                self.conn.commit()
+                messagebox.showinfo("Success", "Profile Created Successfully! Login to continue.", parent=setup_win)
+                setup_win.destroy()
+                self.perform_login(None) 
+            except Exception as e:
+                messagebox.showerror("Error", f"Error saving profile: {e}", parent=setup_win)
+                # If username exists error, handle it gracefully
+                if "UNIQUE constraint" in str(e):
+                    messagebox.showerror("Error", "Username already taken.", parent=setup_win)
+
+        ttk.Button(main_fr, text="SAVE & START SYSTEM", command=save_user, style="success.TButton", width=30).pack(pady=40, ipady=5)
 
     # def perform_login(self, user_data):
     #     if user_data:
@@ -410,20 +461,20 @@ class QuotationApp:
         if user_data:
             self.root.deiconify()
             self.current_username = user_data[1]
-
-            # Apply saved theme preference for this user (if any)
+            
+            # Load Profile Pic Path if available
             try:
-                theme = "cosmo"
-                self.cursor.execute(
-                    "SELECT theme_preference FROM users WHERE username=?",
-                    (self.current_username,),
-                )
-                row = self.cursor.fetchone()
-                if row and row[0]:
-                    theme = row[0]
-                self.style = ThemeManager.apply_theme(self.root, theme)
+                # user_data is row from users table. schema changed so fetching by name is better, but user_data might be raw tuple
+                # Let's re-fetch safely
+                self.cursor.execute("SELECT profile_pic_path, theme_preference FROM users WHERE username=?", (self.current_username,))
+                urow = self.cursor.fetchone()
+                if urow:
+                    self.current_user_pic_path = urow[0]  # Store for Dashboard
+                    theme = urow[1] if urow[1] else "cosmo"
+                    self.style = ThemeManager.apply_theme(self.root, theme)
             except Exception as e:
-                print(f"Theme load error (perform_login with user_data): {e}")
+                print(f"Login data fetch error: {e}")
+                self.current_user_pic_path = None
 
             from dashboard import DashboardPanel
             self.current_dashboard = DashboardPanel(self)
@@ -432,27 +483,20 @@ class QuotationApp:
         self.root.withdraw()
         login_win = tk.Toplevel(self.root)
         login_win.title("ODM Secure Login")
-        
-        # Proper Window Size
-        win_w, win_h = 750, 650
-        screen_w = login_win.winfo_screenwidth()
-        screen_h = login_win.winfo_screenheight()
-        pos_x = (screen_w // 2) - (win_w // 2)
-        pos_y = (screen_h // 2) - (win_h // 2)
-        login_win.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
-        login_win.resizable(False, False)
+        login_win.state('zoomed') # ZOOMED / MAXIMIZED
         login_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
 
+        # Center Frame
         main_fr = ttk.Frame(login_win, padding=30)
-        main_fr.pack(fill='both', expand=True)
+        main_fr.place(relx=0.5, rely=0.5, anchor='center')
 
-        tk.Label(main_fr, text="SECURE LOGIN", font=("Segoe UI", 20, "bold"), fg="#2c3e50").pack(pady=(10, 20))
+        tk.Label(main_fr, text="SECURE LOGIN", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(10, 20))
         
         ttk.Label(main_fr, text="Username:").pack(anchor='w')
-        u_ent = ttk.Entry(main_fr, width=40); u_ent.pack(pady=5)
+        u_ent = ttk.Entry(main_fr, width=40, font=("Segoe UI", 11)); u_ent.pack(pady=5)
         
         ttk.Label(main_fr, text="Password:").pack(anchor='w', pady=(10, 0))
-        p_ent = ttk.Entry(main_fr, width=40, show="*"); p_ent.pack(pady=5)
+        p_ent = ttk.Entry(main_fr, width=40, show="*", font=("Segoe UI", 11)); p_ent.pack(pady=5)
 
         # ✅ REMEMBER ME LOGIC
         self.remember_me_var = tk.BooleanVar(value=False)
@@ -472,124 +516,129 @@ class QuotationApp:
             self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
             row = self.cursor.fetchone()
             if row:
-                # Save credentials if Remember Me is checked
                 if self.remember_me_var.get():
-                    with open(rem_file, 'w') as f:
-                        json.dump({'user': username, 'pass': password}, f)
+                    with open(rem_file, 'w') as f: json.dump({'user': username, 'pass': password}, f)
                 elif os.path.exists(rem_file):
                     os.remove(rem_file)
 
-                # Apply saved theme preference for this user (if any) before opening dashboard
-                try:
-                    theme = "cosmo"
-                    self.cursor.execute(
-                        "SELECT theme_preference FROM users WHERE username=?",
-                        (username,),
-                    )
-                    trow = self.cursor.fetchone()
-                    if trow and trow[0]:
-                        theme = trow[0]
-                    self.style = ThemeManager.apply_theme(self.root, theme)
-                except Exception as e:
-                    print(f"Theme load error (try_login): {e}")
-
                 login_win.destroy()
-                self.root.deiconify()
-                self.current_username = row[1]
-                from dashboard import DashboardPanel
-                self.current_dashboard = DashboardPanel(self)
+                self.perform_login(row)
             else:
                 messagebox.showerror("Failed", "Invalid Credentials", parent=login_win)
 
-        ttk.Button(main_fr, text="LOGIN", command=try_login, bootstyle="success", width=25).pack(pady=15)
+        ttk.Button(main_fr, text="LOGIN", command=try_login, bootstyle="success", width=25).pack(pady=20)
 
-        # ✅ RECOVERY & SETUP SECTION (Always Visible)
+        # ✅ RECOVERY Links
         ttk.Separator(main_fr, orient='horizontal').pack(fill='x', pady=15)
         
-        lbl_forgot = tk.Label(main_fr, text="Forgot Password?", fg="blue", cursor="hand2", font=("Arial", 9, "underline"))
-        lbl_forgot.pack(pady=2)
+        lbl_forgot = tk.Label(main_fr, text="Forgot Password?", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
+        lbl_forgot.pack(pady=5)
         lbl_forgot.bind("<Button-1>", lambda e: self.forgot_password_flow(u_ent.get().strip(), login_win))
-        # Is line ko update karein:
-        # lbl.bind("<Button-1>", lambda e: self.forgot_password_flow(u_ent.get().strip(), login_win))
 
-        ttk.Label(main_fr, text="Don't have a profile?", font=("Arial", 8), foreground="grey").pack(pady=(10, 0))
+        ttk.Label(main_fr, text="Don't have a profile?", font=("Arial", 9), foreground="grey").pack(pady=(15, 0))
         ttk.Button(main_fr, text="Setup New Profile", command=lambda: [login_win.destroy(), self.perform_setup()], 
                    bootstyle="secondary-outline", width=25).pack(pady=5)
 
-        # --- NEW RESET LOGIC ---
-        def forgot_password_flow(self, username, login_win):
-            """Security answer verify karke password reset ya system reset karne ka function."""
-            if not username:
-                messagebox.showwarning("Required", "Enter your Username first!", parent=login_win)
-                return
+    def forgot_password_flow(self, prefill_user, parent_win):
+        rec_win = tk.Toplevel(parent_win)
+        rec_win.title("Password Recovery")
+        rec_win.geometry("600x600")
+        
+        tk.Label(rec_win, text="Password Recovery", font=("Segoe UI", 16, "bold")).pack(pady=15)
+        
+        f = ttk.Frame(rec_win, padding=20)
+        f.pack(fill='both', expand=True)
 
-            # 1. Database se security answer uthayein
-            self.cursor.execute("SELECT security_answer FROM users WHERE username=?", (username,))
-            row = self.cursor.fetchone()
-        
-            if not row:
-                messagebox.showerror("Error", f"User '{username}' not found!", parent=login_win)
-                return
-        
-            real_answer = row[0] # Database wala answer
-        
-            # 2. Popup Window Setup
-            reset_win = tk.Toplevel(login_win)
-            reset_win.title("Security Verification")
-            reset_win.geometry("450x300")
-            reset_win.grab_set() # Focus lock karein
-        
-            main_f = ttk.Frame(reset_win, padding=20)
-            main_f.pack(fill='both', expand=True)
+        tk.Label(f, text="Enter Username to fetch questions:").pack(anchor='w')
+        u_e = ttk.Entry(f, width=40)
+        u_e.pack(pady=5)
+        if prefill_user: u_e.insert(0, prefill_user)
 
-            tk.Label(main_f, text=f"Hello {username},", font=("Segoe UI", 12, "bold")).pack(pady=5)
-            tk.Label(main_f, text="Question: What is your Father's Name?").pack(pady=5)
-        
-            ans_ent = ttk.Entry(main_f, width=40)
-            ans_ent.pack(pady=10)
-            ans_ent.focus_set()
+        # Container for Qs
+        q_frame = ttk.Frame(f)
+        q_frame.pack(fill='both', expand=True, pady=10)
 
-            # Counter logic using a list to keep reference across inner functions
-            attempts = [0] 
+        self.questions_loaded = False
+        self.real_answers = []
 
-            def verify_and_reset():
-                user_ans = ans_ent.get().strip()
+        def load_questions():
+            user = u_e.get().strip()
+            if not user: return
             
-                # ✅ CASE-INSENSITIVE CHECK: Dono ko lower case mein convert karke match karein
-                if user_ans.lower() == real_answer.lower():
-                    new_pass = simpledialog.askstring("Reset Password", "Enter New Password:", parent=reset_win, show='*')
-                    if new_pass:
-                        self.cursor.execute("UPDATE users SET password=? WHERE username=?", (new_pass, username))
-                        self.conn.commit()
-                        messagebox.showinfo("Success", "Password Changed Successfully! Login Now.", parent=reset_win)
-                        reset_win.destroy()
-                else:
-                    # Ghalat jawab par counter barhayein
-                    attempts[0] += 1
-                    remaining = 3 - attempts[0]
+            # Fetch q1, a1...
+            try:
+                self.cursor.execute("SELECT q1, a1, q2, a2, q3, a3 FROM users WHERE username=?", (user,))
+                row = self.cursor.fetchone()
                 
-                    if remaining > 0:
-                        messagebox.showerror("Wrong Answer", f"Incorrect! Attempts left: {remaining}", parent=reset_win)
-                    else:
-                        #  3 WRONG ATTEMPTS: SYSTEM RESET LOGIC
-                        messagebox.showerror("CRITICAL ALERT", "3 Wrong Attempts!\nSecurity Breach Detected.\nSystem Resetting...", parent=reset_win)
+                for w in q_frame.winfo_children(): w.destroy()
+                
+                if row and row[0]: # Has Qs
+                    self.questions_loaded = True
+                    self.real_answers = [row[1], row[3], row[5]] # a1, a2, a3
                     
-                        try:
-                            # Database clean karein
-                            self.cursor.execute("DELETE FROM users")
-                            self.conn.commit()
-                        
-                            # Windows band karke restart setup
-                            reset_win.destroy()
-                            login_win.destroy()
-                        
-                            self.init_database() # Re-initialize
-                            self.perform_setup() # Profile creation screen par wapis bhej dein
-                        
-                        except Exception as e:
-                            messagebox.showerror("Reset Error", f"Critical fail: {str(e)}")
+                    tk.Label(q_frame, text="Please answer the following:", font=("bold")).pack(pady=5)
+                    
+                    self.ans_entries = []
+                    
+                    # Q1
+                    tk.Label(q_frame, text=f"Q1: {row[0]}").pack(anchor='w', pady=(5,0))
+                    e1 = ttk.Entry(q_frame, width=40); e1.pack(pady=2)
+                    self.ans_entries.append(e1)
+                    
+                    # Q2
+                    tk.Label(q_frame, text=f"Q2: {row[2]}").pack(anchor='w', pady=(5,0))
+                    e2 = ttk.Entry(q_frame, width=40); e2.pack(pady=2)
+                    self.ans_entries.append(e2)
+                    
+                    # Q3
+                    tk.Label(q_frame, text=f"Q3: {row[4]}").pack(anchor='w', pady=(5,0))
+                    e3 = ttk.Entry(q_frame, width=40); e3.pack(pady=2)
+                    self.ans_entries.append(e3)
+                    
+                else:
+                    tk.Label(q_frame, text="User not found or no questions set.", fg="red").pack(pady=20)
+                    self.questions_loaded = False
+            except Exception as e:
+                print(e)
 
-            ttk.Button(main_f, text="Verify Answer", command=verify_and_reset, bootstyle="success").pack(pady=20)
+        ttk.Button(f, text="Load Questions", command=load_questions, style="info.TButton").pack(pady=5)
+        
+        def verify_answers():
+            if not self.questions_loaded: return
+            
+            username = u_e.get().strip()
+            score = 0
+            for i, ent in enumerate(self.ans_entries):
+                user_ans = ent.get().strip().lower()
+                real_ans = self.real_answers[i].strip().lower() if self.real_answers[i] else ""
+                
+                if user_ans and user_ans == real_ans:
+                    score += 1
+            
+            if score >= 2:
+                # Success
+                new_pass = simpledialog.askstring("Reset Password", "Authentication Verified!\nEnter New Password:", parent=rec_win, show='*')
+                if new_pass:
+                    self.cursor.execute("UPDATE users SET password=? WHERE username=?", (new_pass, username))
+                    self.conn.commit()
+                    messagebox.showinfo("Success", "Password Changed! Please Login.", parent=rec_win)
+                    rec_win.destroy()
+            else:
+                messagebox.showerror("Failed", f"Verification Failed.\nCorrect Answers: {score}/3\nNeed at least 2 correct.", parent=rec_win)
+                # Show Re-create profile option
+                btn_reset_profile.pack(pady=10)
+
+        verify_btn = ttk.Button(f, text="Verify & Reset", command=verify_answers, style="success.TButton")
+        verify_btn.pack(pady=20)
+
+        # Fallback Option (Initially Hidden)
+        def fallback_reset():
+            if messagebox.askyesno("Setup New Profile", "This will overwrite the database keys for this user (if local DB). Continue?"):
+                rec_win.destroy()
+                parent_win.destroy()
+                self.perform_setup()
+
+        btn_reset_profile = ttk.Button(f, text="Forgot Answers? Setup New Profile", command=fallback_reset, style="danger.Outline.TButton")
 
     # =========================================================================
     # DATABASE METHODS
@@ -703,6 +752,13 @@ class QuotationApp:
         add_column_if_missing("users", "security_answer", "TEXT")
         add_column_if_missing("users", "is_premium", "INTEGER DEFAULT 0")
         add_column_if_missing("users", "theme_preference", "TEXT DEFAULT 'cosmo'")
+        add_column_if_missing("users", "q1", "TEXT")
+        add_column_if_missing("users", "a1", "TEXT")
+        add_column_if_missing("users", "q2", "TEXT")
+        add_column_if_missing("users", "a2", "TEXT")
+        add_column_if_missing("users", "q3", "TEXT")
+        add_column_if_missing("users", "a3", "TEXT")
+        add_column_if_missing("users", "profile_pic_path", "TEXT")
 
         self.conn.commit()
         print("✅ Database Connected & Schema Synchronized (Errors Fixed)")

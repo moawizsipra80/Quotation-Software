@@ -9,6 +9,7 @@ import pyodbc
 import ui_styles as style  
 import pywinstyles
 from theme_manager import ThemeManager
+from PIL import Image, ImageTk
 class DashboardPanel:
 
     def __init__(self, main_app):
@@ -248,6 +249,17 @@ class DashboardPanel:
         )
         theme_combo.pack(side='left')
         theme_combo.bind("<<ComboboxSelected>>", self.app.update_app_theme)
+
+        # Profile Picture
+        pic_path = getattr(self.app, 'current_user_pic_path', None)
+        if pic_path and os.path.exists(pic_path):
+            try:
+                pil_img = Image.open(pic_path)
+                pil_img = pil_img.resize((45, 45), Image.Resampling.LANCZOS)
+                self.profile_icon = ImageTk.PhotoImage(pil_img) 
+                tk.Label(header, image=self.profile_icon, bg="#f4f6f9").pack(side='right', padx=(5, 5))
+            except Exception as e:
+                print(f"Profile Pic Error: {e}")
 
         tk.Label(header, text=f"Welcome, {user}", font=("Segoe UI", 12), fg="grey", bg="#f4f6f9").pack(side='right', padx=(10, 0), pady=10)
 
