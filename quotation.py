@@ -132,16 +132,26 @@ class QuotationApp:
 
         # --- CUSTOM COLUMNS SETUP ---
         self.columns_config = [
-            {'id': 'sno',   'label': 'S.No', 'width': 40, 'type': 'auto'},
-            {'id': 'desc',  'label': 'Description', 'width': 350, 'type': 'text'},
-            {'id': 'uom',   'label': 'UOM', 'width': 60, 'type': 'text'},
+            {'id': 'sno',   'label': 'S.No', 'width': 35, 'type': 'auto'},
+            {'id': 'desc',  'label': 'Description', 'width': 300, 'type': 'text'},
+            {'id': 'uom',   'label': 'UOM', 'width': 50, 'type': 'text'},
             {'id': 'qty',   'label': 'Qty', 'width': 60, 'type': 'number'},
-            {'id': 'price', 'label': 'Price', 'width': 120, 'type': 'number'},
-            {'id': 'amount','label': 'Amount', 'width': 120, 'type': 'calc'},
-            {'id': 'gst',   'label': 'Tax', 'width': 80, 'type': 'calc'},
-            {'id': 'total', 'label': 'Total', 'width': 120, 'type': 'calc'}
+            {'id': 'price', 'label': 'Price', 'width': 130, 'type': 'number'},
+            {'id': 'amount','label': 'Amount', 'width': 130, 'type': 'calc'},
+            {'id': 'gst',   'label': 'Tax', 'width': 90, 'type': 'calc'},
+            {'id': 'total', 'label': 'Total', 'width': 130, 'type': 'calc'}
         ]
         self.dynamic_vars = {}
+
+        # --- FINANCIAL TOTALS STATE ---
+        self.subtotal_var = tk.StringVar(value="0.00")
+        self.tax_total_var = tk.StringVar(value="0.00")
+        self.grand_total_var = tk.StringVar(value="0.00")
+        
+        # Print selection flags
+        self.print_subtotal_var = tk.BooleanVar(value=True)
+        self.print_tax_var = tk.BooleanVar(value=True)
+        self.print_grand_total_var = tk.BooleanVar(value=True)
 
         # Footer State
         self.footer_align_var = tk.StringVar(value="Center")
@@ -1551,26 +1561,45 @@ class QuotationApp:
         col1 = ttk.Labelframe(bot_box, text=" Financial Settings ", bootstyle="info", padding=15)
         col1.grid(row=0, column=0, sticky="nsew", padx=10)
         
-        # Currency & Tax
+        # Currency & Tax Rate
         r1 = ttk.Frame(col1)
         r1.pack(fill='x', pady=5)
         ttk.Label(r1, text="Currency:", foreground="white").pack(side='left')
         ttk.Combobox(r1, textvariable=self.currency_var, values=["PKR", "USD", "EUR", "GBP"], width=5, bootstyle="success").pack(side='left', padx=5)
         self.currency_var.trace('w', self.update_currency_symbol)
         
-        ttk.Label(r1, text="GST %:", foreground="white").pack(side='left', padx=(15, 5))
+        ttk.Label(r1, text="Global Tax %:", foreground="white").pack(side='left', padx=(10, 5))
         gst_e = ttk.Entry(r1, textvariable=self.gst_rate_var, width=6, bootstyle="warning")
         gst_e.pack(side='left')
         gst_e.bind('<FocusOut>', lambda e: self.recalc_all())
 
-        # GRAND TOTAL (BIG GREEN)
-        ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=15)
-        ttk.Label(col1, text="Grand Total:", font=("Segoe UI", 10)).pack(anchor='w')
-        # Big Text Style
-        self.total_lbl = ttk.Label(col1, text="Rs. 0.00", font=("Segoe UI", 20, "bold"), foreground="#00e676")
-        self.total_lbl.pack(anchor='w', pady=(0, 10))
+        # --- NEW: EDITABLE FINANCIAL SUMMARY ---
+        ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=10)
+        
+        # Helper for Summary Rows
+        def add_sum_row(parent, label, val_var, chk_var, is_bold=False):
+            f = ttk.Frame(parent)
+            f.pack(fill='x', pady=2)
+            
+            # Checkbox (Print?)
+            ttk.Checkbutton(f, variable=chk_var, bootstyle="round-toggle").pack(side='left', padx=(0,5))
+            
+            # Label
+            font = ("Segoe UI", 10, "bold") if is_bold else ("Segoe UI", 10)
+            ttk.Label(f, text=label, width=12, font=font).pack(side='left')
+            
+            # Entry (Editable)
+            e = ttk.Entry(f, textvariable=val_var, justify='right', font=font, width=15)
+            e.pack(side='right', fill='x', expand=True)
+            return e
 
-        # Extra Fields
+        add_sum_row(col1, "Sub Total:", self.subtotal_var, self.print_subtotal_var)
+        add_sum_row(col1, "Total Tax:", self.tax_total_var, self.print_tax_var)
+        grand_ent = add_sum_row(col1, "Grand Total:", self.grand_total_var, self.print_grand_total_var, is_bold=True)
+        # grand_ent.configure(bootstyle="success")
+
+        # Extra Fields Container
+        ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=10)
         ttk.Button(col1, text="+ Add Extra Field", bootstyle="secondary-outline", command=self.add_extra_field).pack(anchor='w', fill='x')
         self.extra_cont = ttk.Frame(col1)
         self.extra_cont.pack(fill='x', pady=5)
@@ -2602,8 +2631,37 @@ class QuotationApp:
 
     def recalc_all(self):
         self.refresh_tree()
-        total = sum(i.get('total', 0) for i in self.items_data)
-        self.total_lbl.config(text=f"Grand Total: {self.currency_symbol_var.get()} {total:,.2f}")
+        
+        # Calculate Totals
+        sub_total = 0.0
+        tax_total = 0.0
+        
+        for i in self.items_data:
+            # Amount without Tax
+            a = i.get('amount', 0)
+            try: a = float(a)
+            except: a = 0.0
+            sub_total += a
+            
+            # Tax
+            t = i.get('gst', 0)
+            try: t = float(t)
+            except: t = 0.0
+            tax_total += t
+            
+            # Add Extra Calculates (Calculated Columns)
+            # Logic: If 'total' is overridden, we trust it? 
+            # Ideally: Grand Total = SubTotal + Tax + GlobalPCT?
+            # But currently `total` row item includes everything.
+            
+        grand_total = sum(i.get('total', 0) for i in self.items_data)
+
+        # Update Variables (Formatting .2f)
+        self.subtotal_var.set(f"{sub_total:,.2f}")
+        self.tax_total_var.set(f"{tax_total:,.2f}")
+        self.grand_total_var.set(f"{grand_total:,.2f}")
+
+        # Note: self.total_lbl Removed. Now using specific variables.
 
     def move_row(self, direction):
         sel = self.tree.selection()
@@ -2951,6 +3009,49 @@ class QuotationApp:
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
         elements.append(t_items)
+        elements.append(Spacer(1, 10))
+
+        # --- FINANCIAL SUMMARY TABLE (Conditional) ---
+        summary_data = []
+        curr = self.currency_symbol_var.get()
+        
+        # Sub Total
+        if self.print_subtotal_var.get():
+            summary_data.append([
+                Paragraph("<b>Total Amount (Excl. Tax):</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
+                Paragraph(f"<b>{curr} {self.subtotal_var.get()}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
+            ])
+            
+        # Tax Total
+        if self.print_tax_var.get():
+            summary_data.append([
+                Paragraph("<b>Total Sales Tax:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
+                Paragraph(f"<b>{curr} {self.tax_total_var.get()}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
+            ])
+            
+        # Grand Total
+        if self.print_grand_total_var.get():
+            summary_data.append([
+                Paragraph("<b>Grand Total:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT, fontSize=11)),
+                Paragraph(f"<b>{curr} {self.grand_total_var.get()}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT, fontSize=11))
+            ])
+            
+        if summary_data:
+            # Align right side of page
+            # Table width logic: let's say 40% of page width aligned right
+            t_sum = Table(summary_data, colWidths=[CW*0.25, CW*0.15])
+            t_sum.setStyle(TableStyle([
+                ('LINEABOVE', (0,0), (-1,0), 1, colors.black),
+                # ('GRID', (0,0), (-1,-1), 0.5, colors.grey), # Uncomment to debug grid
+                ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ]))
+            # Use a wrapper table to push it to the right
+            wrapper = Table([[ "", t_sum ]], colWidths=[CW*0.6, CW*0.4])
+            wrapper.setStyle(TableStyle([('ALIGN', (1,0), (1,0), 'RIGHT')]))
+            elements.append(wrapper)
+
+        elements.append(Spacer(1, 25))
 
         # 4. TERMS & SIGNATURES BLOCK (KeepTogether protection)
         footer_elements = []

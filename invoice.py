@@ -500,15 +500,6 @@ class InvoiceApp(QuotationApp):
                 row.append(Paragraph(str(val).replace("\n", "<br/>"), p_style))
             data.append(row)
         
-        net_amt_txt = self.total_lbl.cget('text').replace("Net Amount:", "").strip()
-        gt_row = [Paragraph("", item_norm_style)] * len(print_cols)
-        if len(print_cols) >= 2:
-            gt_row[-2] = Paragraph("<b>Net Amount:</b>", item_num_style)
-            gt_row[-1] = Paragraph(f"<b>{net_amt_txt}</b>", item_num_style)
-        else:
-            gt_row[-1] = Paragraph(f"<b>Net Amount: {net_amt_txt}</b>", item_num_style)
-        data.append(gt_row)
-        
         t_items = Table(data, colWidths=pdf_col_widths, repeatRows=1, splitByRow=True)
         t_items.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-2), 0.5, colors.black),
@@ -519,6 +510,52 @@ class InvoiceApp(QuotationApp):
             ('BOTTOMPADDING', (0,0), (-1,-1), 4),
         ]))
         elements.append(t_items)
+        elements.append(Spacer(1, 10))
+
+        # --- FINANCIAL SUMMARY TABLE (Conditional) ---
+        summary_data = []
+        curr = self.currency_symbol_var.get()
+        
+        # We need to access the variables from the parent or self if they exist
+        # Since InvoiceApp inherits QuotationApp, it should have them if initialized correctly.
+        # However, InvoiceApp might be using its own 'recalc' logic or might need to ensure variables are present.
+        # Assuming variables are available from QuotationApp.__init__ or we need to gracefully fallback.
+        
+        # Sub Total
+        if hasattr(self, 'print_subtotal_var') and self.print_subtotal_var.get():
+            val = self.subtotal_var.get() if hasattr(self, 'subtotal_var') else "0.00"
+            summary_data.append([
+                Paragraph("<b>Total Amount (Excl. Tax):</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
+                Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
+            ])
+            
+        # Tax Total
+        if hasattr(self, 'print_tax_var') and self.print_tax_var.get():
+            val = self.tax_total_var.get() if hasattr(self, 'tax_total_var') else "0.00"
+            summary_data.append([
+                Paragraph("<b>Total Sales Tax:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
+                Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
+            ])
+            
+        # Grand Total
+        if hasattr(self, 'print_grand_total_var') and self.print_grand_total_var.get():
+            val = self.grand_total_var.get() if hasattr(self, 'grand_total_var') else net_amt_txt
+            summary_data.append([
+                Paragraph("<b>Grand Total:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT, fontSize=11)),
+                Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT, fontSize=11))
+            ])
+            
+        if summary_data:
+             t_sum = Table(summary_data, colWidths=[CW*0.25, CW*0.15])
+             t_sum.setStyle(TableStyle([
+                ('LINEABOVE', (0,0), (-1,0), 1, colors.black),
+                ('ALIGN', (0,0), (-1,-1), 'RIGHT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+             ]))
+             wrapper = Table([[ "", t_sum ]], colWidths=[CW*0.6, CW*0.4])
+             wrapper.setStyle(TableStyle([('ALIGN', (1,0), (1,0), 'RIGHT')]))
+             elements.append(wrapper)
+
         elements.append(Spacer(1, 20))
 
         # --- SIGNATURES & TAX SECTION ---
