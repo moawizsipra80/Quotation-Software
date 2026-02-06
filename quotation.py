@@ -3053,62 +3053,59 @@ class QuotationApp:
 
         elements.append(Spacer(1, 25))
 
-        # 4. TERMS & SIGNATURES BLOCK (KeepTogether protection)
-        footer_elements = []
-        # Prepared / Approved By (Alignment & Baseline Fix)
-        footer_elements.append(Spacer(1, 50))
+        # 4. TERMS & CONDITIONS (Restored)
+        elements.append(Paragraph("<b>Terms & Conditions:</b>", ParagraphStyle('BT', parent=norm_style, fontSize=10)))
+        # Use a spacer or keep it close
+        elements.append(Paragraph(self._get_tagged_text(), ParagraphStyle('BC', parent=norm_style, fontSize=9)))
+        elements.append(Spacer(1, 20))
+
+        # 5. SIGNATURES BLOCK
+        # Prepared / Approved By (Alignment Fix)
+        footer_elements = []  # Start a new list for the keep-together block if needed, or just append to elements
+        
+        # We want "Prepared By" (Left), "System Note" (Center), "Approved By" (Right)
+        # All on generally the same horizontal level, bottom-aligned.
         
         sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=10, alignment=TA_LEFT)
         sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=10, alignment=TA_RIGHT)
         sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=8, alignment=TA_CENTER, textColor=colors.red)
+        
+        # Structure:
+        # Row 1: ___________       (Note)        ___________
+        # Row 2: Prepared By   (System Gen...)   Approved By
+        
+        # Ideally, we can do it in one cell with <br/> or separate rows.
+        # Let's use separate cells for cleanliness.
+        
         is_quotation = self.__class__.__name__ == "QuotationApp"
+        
         if is_quotation:
+            # Note Text
+            note_text = "Note: This is a system generated document so no need to sign."
+            
             sig_data = [[
-                Paragraph(f"_________________<br/><b>Prepared By</b>", sig_style_left),
-                Paragraph("<br/>Note: This is a system generated document so no need to sign.", sig_style_center),
-                Paragraph(f"_________________<br/><b>Approved By</b>", sig_style_right)
+                Paragraph("_________________<br/><b>Prepared By</b>", sig_style_left),
+                Paragraph(f"<br/>{note_text}", sig_style_center), 
+                Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
             ]]
         else:
             sig_data = [[
-                Paragraph(f"_________________<br/><b>Prepared By</b>", sig_style_left),
+                Paragraph("_________________<br/><b>Prepared By</b>", sig_style_left),
                 "", 
-                Paragraph(f"_________________<br/><b>Approved By</b>", sig_style_right)
+                Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
             ]]
         
-        t_sig = Table(sig_data, colWidths=[CW*0.40, CW*0.20, CW*0.40])
-        ts = [
+        # Adjust Column Widths to ensure "System Note" fits in center without squashing signatures
+        t_sig = Table(sig_data, colWidths=[CW*0.3, CW*0.4, CW*0.3])
+        t_sig.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
+            ('ALIGN', (1,0), (1,0), 'CENTER'),
             ('ALIGN', (2,0), (2,0), 'RIGHT'),
-            ('LEFTPADDING', (0,0), (-1,-1), 0),
-            ('RIGHTPADDING', (0,0), (-1,-1), 0),
-        ]
-        if is_quotation:
-            ts.append(('SPAN', (0,1), (2,1)))
-            ts.append(('ALIGN', (0,1), (2,1), 'CENTER'))
-            ts.append(('TOPPADDING', (0,1), (2,1), 15))
-        # t_sig.setStyle(TableStyle(ts))
-        # footer_elements = [t_sig]
-        # elements.append(KeepTogether(footer_elements))
-        t_sig.setStyle(TableStyle(ts))
-        elements.append(Spacer(1, 30))
+        ]))
+        
+        # Wrap in KeepTogether to avoid breaking mid-signature
         elements.append(KeepTogether([t_sig]))
-        # t_sig.setStyle(TableStyle([
-        #     ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
-        #     ('ALIGN', (0,0), (0,0), 'LEFT'),   # Prepared By -> Extreme Left
-        #     ('ALIGN', (1,0), (1,0), 'CENTER'), # System Note -> Center
-        #     ('ALIGN', (2,0), (2,0), 'RIGHT'),  # Approved By -> Extreme Right
-        #     ('LEFTPADDING', (0,0), (-1,-1), 0),
-        #     ('RIGHTPADDING', (0,0), (-1,-1), 0),
-        #     ('BOTTOMPADDING', (0,0), (-1,-1), 5),
-        # ]))
-
-        # footer_elements = [] # Ensure this list exists
-        # footer_elements.append(t_sig)
-
-        # Protect from splitting across pages
-
-        elements.append(KeepTogether(footer_elements))
         # 5. CANVAS (Social Icons & QR)
         qr_img = self._generate_qr_code("https://www.orientmarketing.com.pk/", size_inch=0.5)
         
