@@ -7,24 +7,16 @@ import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
-# ✅ REPORTLAB IMPORTS
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.graphics.barcode import qr
-from reportlab.graphics.shapes import Drawing
+# ✅ Lazy Imports (Moved inside functions for speed)
 
 # Parent Class Import
 from quotation import QuotationApp 
 
 class DeliveryChallanApp(QuotationApp):
-    def __init__(self, root, from_quotation_data=None):
+    def __init__(self, root, original_root=None, from_quotation_data=None):
         self.root = root 
         self.root.title("Delivery Challan")
-        self.original_root = root
+        self.original_root = original_root
         self.is_invoice_window = True 
         
         # 1) Invoice Specific Vars
@@ -79,17 +71,16 @@ class DeliveryChallanApp(QuotationApp):
         self.mode_rail_var = tk.IntVar()
         self.mode_air_var = tk.IntVar()
         
-        self.init_database()
+        # Ye list extra fields (jo user add karega) store karegi
+        self.extra_transport_fields = []
+        self.add_custom_field_func = None # Safe default
+        
+        # self.init_database() # Removed redundant call, handled by parent super().__init__
         self.current_db_id = None
         self.auto_save_timer = None # Ensure timer var exists
-        self.root.after(5000, self.auto_save_loop)
+        self.root.after(10000, self.auto_save_loop) # Increased delay
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        # Ye list extra fields (jo user add karega) store karegi
-        self.extra_transport_fields = []
-        
-        # Ye list extra fields (jo user add karega) store karegi
-        self.extra_transport_fields = []
         # --------------------------------------------------- 
         # Logo Paths
         self.header_logo_right_path = None
@@ -102,14 +93,14 @@ class DeliveryChallanApp(QuotationApp):
         
         # Logo 2: Page ke neeche wala (Sticker)
         self.footer_logo_path = None 
-        self.f_logo_size_var = tk.DoubleVar(value=2.0)
+        self.f_logo_size_var = tk.DoubleVar(value=1.2)
         self.footer_align_var = tk.StringVar(value="Center") # Left, Center, Right
         self.footer_text_var = tk.StringVar()
         # 2) Parent init
         super().__init__(root) 
         
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+        # Override some parent settings for Challan specific needs
+        self.auto_save_enabled.set(True)
         # 3) Invoice-specific overrides
         self.header_rows = [] 
        
@@ -191,13 +182,24 @@ class DeliveryChallanApp(QuotationApp):
             messagebox.showerror("Error", f"Image Load Error: {e}")
 
     def on_closing(self):
+        """Optimized closing: Instantly restores dashboard and saves in background"""
         try:
-            self.save_to_database(silent=True) 
-            print("✅ Invoice saved & closed cleanly")
+            # 1. Restore dashboard immediately for instant feel
+            if hasattr(self, 'original_root') and self.original_root:
+                try: self.original_root.deiconify()
+                except: pass
+            
+            # 2. Save in background thread so it doesn't block UI closure
+            if self.client_name_var.get().strip():
+                import threading
+                threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
+                
+            print("✅ Challan closure initiated")
         except Exception as e:
             print(f"Close warning (non-critical): {e}")
         finally:
-            self.root.destroy() 
+            try: self.root.destroy()
+            except: pass
 
     def _init_standard_header_rows(self):
         self.header_rows = []
@@ -205,21 +207,35 @@ class DeliveryChallanApp(QuotationApp):
     
     
     # --- DATABASE FUNCTIONS FOR CHALLAN ---
+    # Using parent's init_database (SQLite) now for speed
     def init_database(self):
-        try:
-            import pyodbc
-            self.conn = pyodbc.connect(
-                r'DRIVER={ODBC Driver 17 for SQL Server};'
-                r'SERVER=.\SQLEXPRESS;'
-                r'DATABASE=QuotationDB;'
-                'Trusted_Connection=yes;'
-            )
-            self.cursor = self.conn.cursor()
-        except: pass
+        super().init_database()
 
     def auto_save_loop(self):
-        if self.client_name_var.get().strip(): self.save_to_database(silent=True)
-        self.root.after(5000, self.auto_save_loop)
+        """Optimized auto-save loop to avoid UI hangs"""
+        try:
+            if not self.root.winfo_exists(): return
+        except: return
+
+        if self.client_name_var.get().strip() and len(self.items_data) > 0:
+             import threading
+             # Pre-fetch data to avoid variable access in thread
+             try:
+                 data_to_save = {
+                     'ref_no': self.quotation_no_var.get(),
+                     'client_name': self.client_name_var.get(),
+                     'date': self.doc_date_var.get(),
+                     'items': copy.deepcopy(self.items_data)
+                 }
+             except: data_to_save = None
+
+             if data_to_save:
+                 threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
+             
+        try:
+            if self.root.winfo_exists():
+                self.auto_save_timer = self.root.after(10000, self.auto_save_loop)
+        except: pass
 
     def go_to_dashboard(self):
         self.on_closing() 
@@ -264,9 +280,10 @@ class DeliveryChallanApp(QuotationApp):
         # --- LEFT LOGO ---
         logo_fr = ttk.Frame(top_grid)
         logo_fr.grid(row=0, column=0, sticky='w')
-        ttk.Button(logo_fr, text="Insert Left Logo", width=15, command=lambda: self.load_logo("header")).pack(anchor='w')
+        ttk.Button(logo_fr, text="Insert Left Logo", width=15, command=lambda: self.load_logo("header")).pack(side='left')
+        ttk.Button(logo_fr, text="Reset", width=6, command=lambda: self.reset_logo("header")).pack(side='left', padx=2)
         self.header_logo_lbl = tk.Label(logo_fr, text="", bg="#f0f0f0") 
-        self.header_logo_lbl.pack(anchor='w', pady=2)
+        self.header_logo_lbl.pack(side='left', padx=2)
 
         # --- CENTER: TITLE ---
         tk.Label(top_grid, text="Delivery Challan", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
@@ -282,9 +299,10 @@ class DeliveryChallanApp(QuotationApp):
         # --- RIGHT LOGO ---
         r_logo_fr = ttk.Frame(top_grid)
         r_logo_fr.grid(row=0, column=3, sticky='e', padx=(20,0))
-        ttk.Button(r_logo_fr, text="Insert Right Logo", width=15, command=lambda: self.load_logo("header_right")).pack(anchor='e')
+        ttk.Button(r_logo_fr, text="Insert Right Logo", width=15, command=lambda: self.load_logo("header_right")).pack(side='left')
+        ttk.Button(r_logo_fr, text="Reset", width=6, command=lambda: self.reset_logo("header_right")).pack(side='left', padx=2)
         self.header_logo_right_lbl = tk.Label(r_logo_fr, text="", bg="#f0f0f0") 
-        self.header_logo_right_lbl.pack(anchor='e', pady=2)
+        self.header_logo_right_lbl.pack(side='left', padx=2)
 
 
         # 3. DETAILS TABLES
@@ -351,7 +369,7 @@ class DeliveryChallanApp(QuotationApp):
         tk.Checkbutton(p_frame, text="Sale", variable=self.purpose_sale_var).pack(side='left')
         tk.Checkbutton(p_frame, text="Job Work", variable=self.purpose_job_var).pack(side='left')
         tk.Checkbutton(p_frame, text="Returnable", variable=self.purpose_ret_var).pack(side='left')
-        
+        tk.Checkbutton(p_frame, text="Non-Returnable", variable=self.purpose_nonret_var).pack(side='left')
         # 2. Source Selection (Triggers)
         src_frame = tk.Frame(left_frame, bg="#eef"); src_frame.pack(fill='x', pady=5, padx=2)
         tk.Label(src_frame, text="Source of Transport:", font=("bold"), bg="#eef").pack(side='left', padx=5)
@@ -423,6 +441,7 @@ class DeliveryChallanApp(QuotationApp):
         box_logo_fr.pack(fill='x', pady=5)
         b1 = ttk.Frame(box_logo_fr); b1.pack(fill='x', pady=5)
         ttk.Button(b1, text="Upload Box Logo", command=lambda: self.load_logo("delivered")).pack(side='left', padx=5)
+        ttk.Button(b1, text="Reset", width=6, command=lambda: self.reset_logo("delivered")).pack(side='left', padx=2)
         self.delivered_logo_lbl = ttk.Label(b1, text="(None)", foreground="grey"); self.delivered_logo_lbl.pack(side='left')
 
         # Footer Sticker
@@ -430,6 +449,7 @@ class DeliveryChallanApp(QuotationApp):
         foot_logo_fr.pack(fill='x', pady=5)
         b2 = ttk.Frame(foot_logo_fr); b2.pack(fill='x', pady=5)
         ttk.Button(b2, text="Upload Sticker", command=lambda: self.load_logo("footer")).pack(side='left', padx=5)
+        ttk.Button(b2, text="Reset", width=6, command=lambda: self.reset_logo("footer")).pack(side='left', padx=2)
         self.footer_logo_lbl = ttk.Label(b2, text="(None)", foreground="grey"); self.footer_logo_lbl.pack(side='left')
         
         sett_row = ttk.Frame(foot_logo_fr); sett_row.pack(fill='x', pady=5, padx=5)
@@ -437,35 +457,223 @@ class DeliveryChallanApp(QuotationApp):
         ttk.Combobox(sett_row, textvariable=self.footer_align_var, values=["Left", "Center", "Right"], width=8, state="readonly").pack(side='left', padx=5)
         ttk.Label(sett_row, text="Size:").pack(side='left', padx=(10,0))
         ttk.Scale(sett_row, variable=self.f_logo_size_var, from_=1.0, to=5.0, length=60).pack(side='left', padx=5)
+        
+        # Restore Missing Footer Text & Settings
+        ft_txt_fr = ttk.Frame(foot_logo_fr); ft_txt_fr.pack(fill='x', pady=5, padx=5)
+        ttk.Label(ft_txt_fr, text="Footer Text:").pack(side='left')
+        ttk.Entry(ft_txt_fr, textvariable=self.footer_text_var).pack(side='left', fill='x', expand=True, padx=5)
+        
+        ft_opt_fr = ttk.Frame(foot_logo_fr); ft_opt_fr.pack(fill='x', pady=2, padx=5)
+        ttk.Checkbutton(ft_opt_fr, text="Pin to Bottom", variable=self.footer_pin_to_bottom_var).pack(side='left', padx=5)
+        ttk.Checkbutton(ft_opt_fr, text="Full Width", variable=self.footer_full_width_var).pack(side='left', padx=5)
 
         ttk.Button(right_frame, text="👁 PREVIEW PDF", style="Action.TButton", command=self.on_preview_click).pack(fill='x', ipady=10, pady=20)
 
-    # ✅ LOGIC UPDATE: Check ALL modes
-    def update_ui_visibility(self):
-        if self.source_public_var.get():
-            self.public_section_frame.pack(fill='x', pady=5, padx=5)
-            
-            # Agar koi bhi mode tick ho, to details dikhao
-            any_mode = (self.mode_cargo_var.get() or 
-                        self.mode_courier_var.get() or 
-                        self.mode_rail_var.get() or 
-                        self.mode_air_var.get())
-            
-            if any_mode:
-                self.cargo_details_frame.pack(fill='x', pady=5, padx=5)
+    def on_preview_click(self):
+        """PDF Preview logic for Delivery Challan (Robust Threading)"""
+        import threading
+        
+        # 1. Pre-fetch ALL data from UI thread (CRITICAL for thread safety)
+        # try:
+        #     ui_data = {
+        #         "quotation_no": self.quotation_no_var.get(),
+        #         "doc_date": self.doc_date_var.get(),
+        #         "rfq_no": self.rfq_no_var.get(),
+        #         "ref_quot_no": self.ref_quot_no_var.get(),
+        #         "client_name": self.client_name_var.get(),
+        #         "client_stn": self.client_stn_var.get(),
+        #         "dc_no": self.dc_no_var.get(),
+        #         "client_addr": self.client_addr_var.get(),
+        #         "client_ntn": self.client_ntn_var.get(),
+        #         "vendor_stn": self.vendor_stn_var.get(),
+        #         "client_contact": self.client_contact_var.get(),
+        #         "delivery_date": self.delivery_date_var.get(),
+        #         "vendor_ntn": self.vendor_ntn_var.get(),
+        #         "client_designation": self.client_designation_var.get(),
+        #         "delivered_through": self.delivered_through_var.get(),
+        #         "vendor_pra": self.vendor_pra_var.get(),
+        #         "client_email": self.client_email_var.get(),
+        #         "vendor_email": self.vendor_email_var.get(),
+        #         "left_header": self.left_header_title.get(),
+        #         "right_header": self.right_header_title.get(),
+        #         "tagged_terms": self._get_tagged_text(),
+        #         "footer_logo_size": self.f_logo_size_var.get(),
+        #         "footer_align": self.footer_align_var.get(),
+        #         "items_data": copy.deepcopy(self.items_data)
+        #         "header_logo_path": self.header_logo_path,
+        #         "header_logo_right_path": self.header_logo_right_path,
+        #         "delivered_logo_path": self.delivered_logo_path,
+        #         "footer_logo_path": self.footer_logo_path
+        #     }
+        try:
+            ui_data = {
+                "quotation_no": self.quotation_no_var.get(),
+                "doc_date": self.doc_date_var.get(),
+                "rfq_no": self.rfq_no_var.get(),
+                "ref_quot_no": self.ref_quot_no_var.get(),
+                "client_name": self.client_name_var.get(),
+                "client_stn": self.client_stn_var.get(),
+                "dc_no": self.dc_no_var.get(),
+                "client_addr": self.client_addr_var.get(),
+                "client_ntn": self.client_ntn_var.get(),
+                "vendor_stn": self.vendor_stn_var.get(),
+                "client_contact": self.client_contact_var.get(),
+                "delivery_date": self.delivery_date_var.get(),
+                "vendor_ntn": self.vendor_ntn_var.get(),
+                "client_designation": self.client_designation_var.get(),
+                "delivered_through": self.delivered_through_var.get(),
+                "vendor_pra": self.vendor_pra_var.get(),
+                "client_email": self.client_email_var.get(),
+                "vendor_email": self.vendor_email_var.get(),
+                "left_header": self.left_header_title.get(),
+                "right_header": self.right_header_title.get(),
+                "tagged_terms": self._get_tagged_text(),
+                "footer_logo_size": self.f_logo_size_var.get(),
+                "footer_align": self.footer_align_var.get(),
+                "items_data": copy.deepcopy(self.items_data),
+                
+                # --- YE CHAR LINES ADD KAREIN ---
+                "header_logo_path": self.header_logo_path,
+                "header_logo_right_path": self.header_logo_right_path,
+                "delivered_logo_path": self.delivered_logo_path,
+                "footer_logo_path": self.footer_logo_path
+            }
+        except Exception as e:
+            messagebox.showerror("UI Data Error", f"Failed to read UI fields: {e}")
+            return
+
+        # 2. Show Waiting Window
+        wait = tk.Toplevel(self.root)
+        wait.title("Please Wait")
+        wait.geometry("350x120")
+        wait.resizable(False, False)
+        wait.transient(self.root)
+        # ✅ FIX: Don't use grab_set - it blocks the UI
+        # wait.grab_set()
+        
+        try:
+            root_x = self.root.winfo_x()
+            root_y = self.root.winfo_y()
+            root_w = self.root.winfo_width()
+            root_h = self.root.winfo_height()
+            wait.geometry(f"+{root_x + (root_w//2) - 175}+{root_y + (root_h//2) - 60}")
+        except: pass
+
+        tk.Label(wait, text="🔄 Generating Delivery Challan PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
+        tk.Label(wait, text="This might take a few seconds...", font=("Arial", 9), fg="grey").pack()
+        self.root.update()
+
+        def worker():
+            try:
+                import tempfile
+                fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+                os.close(fd)
+                
+                # Use pre-fetched data inside _generate_pdf
+                self._generate_pdf(tmp_path, ui_data_payload=ui_data) 
+                
+                def finish():
+                    # ✅ RESTORED: Call confirmation popup with Save As options
+                    if os.path.exists(tmp_path):
+                        self._show_preview_confirm(tmp_path, wait)
+                    else:
+                        try:
+                            if wait.winfo_exists(): wait.destroy()
+                        except: pass
+                        messagebox.showerror("Error", "Preview file could not be created.")
+                        
+                self.root.after(0, finish)
+            except Exception as e:
+                err_msg = str(e)
+                def on_err():
+                    try:
+                        if wait.winfo_exists():
+                            wait.destroy()
+                    except: pass
+                    messagebox.showerror("Preview Error", f"Failed to generate PDF:\n{err_msg}")
+                self.root.after(0, on_err)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_pdf(self, path):
+        try:
+            if os.name == 'nt':
+                os.startfile(path)
             else:
-                self.cargo_details_frame.pack_forget()
-        else:
-            self.public_section_frame.pack_forget()
+                import webbrowser
+                webbrowser.open("file://" + path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open PDF: {e}")
 
-        if self.source_special_var.get():
-            self.special_section_frame.pack(fill='x', pady=5, padx=5)
+    # ✅ LOGIC UPDATE: Check ALL modes
+    def load_logo(self, which):
+        """Override parent's load_logo to handle Delivery Challan specific logos"""
+        from tkinter import filedialog
+        from PIL import Image, ImageTk
+        
+        # Use parent=self.root to keep dialog attached to window
+        # And raise window after selection to prevent it going behind
+        path = filedialog.askopenfilename(parent=self.root, filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+        
+        # Force window to top after closing dialog
+        self.root.lift()
+        self.root.focus_force()
+        
+        if not path: return
+        
+        # Map logo types to their paths and labels
+        lbl = None
+        if which == "header":
+            self.header_logo_path = path
+            lbl = self.header_logo_lbl if hasattr(self, 'header_logo_lbl') else None
+        elif which == "header_right":
+            self.header_logo_right_path = path
+            # Right header usually doesn't have a preview label in this UI context, 
+            # but if it does, add logic here. For now, assume None.
+            lbl = None  
+        elif which == "delivered":
+            self.delivered_logo_path = path
+            lbl = self.delivered_logo_lbl
+        elif which == "footer":
+            self.footer_logo_path = path
+            lbl = self.footer_logo_lbl
         else:
-            self.special_section_frame.pack_forget()
+            # Fallback to parent implementation for standard types
+            super().load_logo(which)
+            return
+        
+        # Update label with thumbnail preview
+        if lbl:
+            try:
+                img = Image.open(path)
+                img.thumbnail((30, 30)) # Slightly smaller thumbnail
+                photo = ImageTk.PhotoImage(img)
+                lbl.config(image=photo, text="")
+                lbl.image = photo  # Keep reference
+            except Exception as e:
+                lbl.config(text=f"✓ Loaded", foreground="green")
 
-    # ✅ UI VISIBILITY LOGIC (Class ke andar add karein)
+    def reset_logo(self, which):
+        """Reset the specified logo."""
+        lbl = None
+        if which == "header":
+            self.header_logo_path = None
+            lbl = self.header_logo_lbl
+        elif which == "header_right":
+            self.header_logo_right_path = None
+            lbl = self.header_logo_right_lbl
+        elif which == "delivered":
+            self.delivered_logo_path = None
+            lbl = self.delivered_logo_lbl
+        elif which == "footer":
+            self.footer_logo_path = None
+            lbl = self.footer_logo_lbl
+        
+        if lbl:
+            lbl.config(image='', text="(None)")
+            lbl.image = None
+    
     def update_ui_visibility(self):
-        # 1. Public Logic
         if self.source_public_var.get():
             self.public_section_frame.pack(fill='x', pady=5, padx=5)
             
@@ -498,21 +706,13 @@ class DeliveryChallanApp(QuotationApp):
         
         super().recalc_all()
         
-        def _generate_qr_code(self, data, size_inch=0.6):
-            """Generate a QR code image and return a ReportLab Image object."""
-            try:
-                # QR Code library import check
-                import qrcode
-                qr = qrcode.QRCode(version=1, box_size=10, border=1)
-                qr.add_data(data)
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                tmp = os.path.join(os.environ['TEMP'], "temp_qr.png")
-                img.save(tmp)
-                return RLImage(tmp, width=size_inch*inch, height=size_inch*inch)
-            except Exception as e:
-                print(f"QR Code generation error (Make sure 'qrcode' lib is installed): {e}")
-                return None
+        # Calculate Net Amount for display
+        net_total = 0.0
+        for i in self.items_data:
+            net_total += i.get('total', 0.0)
+        
+        curr = (hasattr(self, 'currency_symbol_var') and self.currency_symbol_var.get()) or "PKR"
+        self.total_lbl.config(text=f"Net Amount: {curr} {net_total:,.2f}")
     # ... (Upar wale functions) ...
 
     def _get_scaled_image(self, path, width_inch):
@@ -520,6 +720,9 @@ class DeliveryChallanApp(QuotationApp):
         if not path or not os.path.exists(path): return None
         
         try:
+            from reportlab.lib.units import inch
+            from reportlab.platypus import Image as RLImage
+            
             # 1. PIL use karke Image ka size lo (Ye method ziyada pakka hai)
             pil_img = Image.open(path)
             iw, ih = pil_img.size
@@ -529,280 +732,62 @@ class DeliveryChallanApp(QuotationApp):
             w = width_inch * inch
             h = w * aspect
             
-            # 3. ReportLab Image Object banao
+            # 3. ReportLab Image Object return karo
             return RLImage(path, width=w, height=h)
         except Exception as e:
             # Agar koi error aye to console main print karo taake pata chale
             print(f"Logo Error ({path}): {e}")
             return None
     
-    # =========================================================
-    #  5. PDF GENERATOR
-    # =========================================================
-    # def _generate_pdf(self, path):
-    #     if not os.path.dirname(path): return
-
-    #     MARGIN = 20 
-    #     doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=MARGIN, leftMargin=MARGIN, topMargin=1.3*inch, bottomMargin=MARGIN)
-    #     elements = []
-    #     styles = getSampleStyleSheet()
-    #     norm_style = styles['Normal']
-        
-    #     # --- 1. HEADER SECTION (Fixed: Title & Info Stacked) ---
-    #     img_left = self._get_scaled_image(self.header_logo_path, 1.2)
-    #     img_right = self._get_scaled_image(self.header_logo_right_path, 1.2)
-        
-    #     # Data
-    #     inv_val = self.quotation_no_var.get()
-    #     date_val = self.doc_date_var.get()
-        
-    #     # Combined HTML Content for Center Cell
-    #     # Using <br/> to force a new line for the details
-    #     center_html = f"""<font size="24" name="Helvetica-Bold">DELIVERY CHALLAN</font><br/>
-    #                       <font size="4"> </font><br/>
-    #                       <font size="10" name="Helvetica"><b>Invoice No:</b> {inv_val} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Date:</b> {date_val}</font>"""
-        
-    #     # Center Paragraph Style
-    #     center_style = ParagraphStyle('Center', parent=norm_style, alignment=TA_CENTER, leading=28) # Increased leading for spacing
-        
-    #     cw = 540
-    #     # 3 Columns: Logo | Title+Details | Logo
-    #     # t_head = Table([
-    #     #     [img_left if img_left else "", Paragraph(center_html, center_style), img_right if img_right else ""]
-    #     # ], colWidths=[cw*0.20, cw*0.60, cw*0.20])
-        
-    #     # t_head.setStyle(TableStyle([
-    #     #     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), # Vertically Center logos
-    #     #     ('ALIGN', (1,0), (1,0), 'CENTER'),    # Center Column Align
-    #     #     ('LEFTPADDING', (0,0), (-1,-1), 0),
-    #     #     ('RIGHTPADDING', (0,0), (-1,-1), 0),
-    #     # ]))
-    #     # elements.append(t_head)
-    #     # elements.append(Spacer(1, 0.3*inch))
-    #     t_head = Table([
-    #         [img_left if img_left else "", Paragraph(center_html, center_style), img_right if img_right else ""]
-    #     ], colWidths=[cw*0.20, cw*0.60, cw*0.20])
-        
-    #     # ✅ YAHAN SETTING CHANGE KI HAI:
-    #     t_head.setStyle(TableStyle([
-    #         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), # Logos vertically center rahenge
-    #         ('ALIGN', (1,0), (1,0), 'CENTER'),    # Text horizontally center rahega
-            
-    #         # 👇 YE LINE Heading ko neeche layegi (15 ko barha kar 20 ya 30 karein agar aur neeche chahiye)
-    #         ('TOPPADDING', (1,0), (1,0), 25),     
-            
-    #         ('LEFTPADDING', (0,0), (-1,-1), 0),
-    #         ('RIGHTPADDING', (0,0), (-1,-1), 0),
-    #     ]))
-    #     elements.append(t_head)
-    #     elements.append(Spacer(1, 0.3*inch))
-    #     # --- 2. SPLIT HEADER TABLES (Client vs Orient) ---
-    #     def mk_b(txt): return Paragraph(f"<b>{txt}</b>", ParagraphStyle('b', parent=norm_style, fontSize=9))
-    #     def mk_n(txt): return Paragraph(f"{txt}", ParagraphStyle('n', parent=norm_style, fontSize=9))
-    #     title_b = ParagraphStyle('tb', parent=norm_style, fontSize=10, alignment=TA_CENTER, fontName='Helvetica-Bold')
-
-    #     # === LEFT TABLE (Client Data) ===
-    #     l_widths = [0.8*inch, 1.6*inch, 0.9*inch, 1.5*inch]
-        
-    #     l_header = [Paragraph(self.left_header_title.get(), title_b), "", "", ""]
-    #     l_rows = [
-    #         l_header,
-    #         [mk_b("DC No:"), mk_n(self.quotation_no_var.get()), mk_b("PO No."), mk_n(self.rfq_no_var.get())],
-    #         [mk_b("Customer:"), mk_n(self.client_name_var.get()), mk_b("S.T.N. NO:"), mk_n(self.client_stn_var.get())],
-    #         [mk_b("Address:"), mk_n(self.client_addr_var.get()), mk_b("NTN:"), mk_n(self.client_ntn_var.get())],
-    #         [mk_b("Contact person:"), mk_n(self.client_contact_var.get()), mk_b("Delivery date:"), mk_n(self.delivery_date_var.get())],
-    #         [mk_b("Designation:"), mk_n(self.client_designation_var.get()), mk_b("Delivered Through:"), mk_n(self.delivered_through_var.get())],
-    #         [mk_b("email:"), mk_n(self.client_email_var.get()), "", ""]
-    #     ]
-        
-    #     t_left = Table(l_rows, colWidths=l_widths)
-    #     t_left.setStyle(TableStyle([
-    #         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-    #         ('SPAN', (0,0), (-1,0)), 
-    #         ('SPAN', (1,6), (3,6)),  
-    #         ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
-    #         ('ALIGN', (0,0), (-1,0), 'CENTER'),
-    #         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-    #         ('LEFTPADDING', (0,0), (-1,-1), 3),
-    #         ('RIGHTPADDING', (0,0), (-1,-1), 3),
-    #     ]))
-
-    #     # === RIGHT TABLE (Orient Data) ===
-    #     r_widths = [0.9*inch, 1.7*inch]
-    #     r_header = [Paragraph(self.right_header_title.get(), title_b), ""]
-    #     r_rows = [
-    #         r_header,
-    #         [mk_b("Quotation No."), mk_n(self.ref_quot_no_var.get())], 
-    #         [mk_b("DC No"), mk_n(self.dc_no_var.get())],               
-    #         [mk_b("S.T.N. No."), mk_n(self.vendor_stn_var.get())],
-    #         [mk_b("NTN:"), mk_n(self.vendor_ntn_var.get())],
-    #         [mk_b("PRA:"), mk_n(self.vendor_pra_var.get())],
-    #         [mk_b("email:"), mk_n(self.vendor_email_var.get())]
-    #     ]
-        
-    #     while len(r_rows) < len(l_rows): r_rows.append(["", ""])
-
-    #     t_right = Table(r_rows, colWidths=r_widths)
-    #     t_right.setStyle(TableStyle([
-    #         ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-    #         ('SPAN', (0,0), (-1,0)), 
-    #         ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
-    #         ('ALIGN', (0,0), (-1,0), 'CENTER'),
-    #         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-    #         ('LEFTPADDING', (0,0), (-1,-1), 3),
-    #         ('RIGHTPADDING', (0,0), (-1,-1), 3),
-    #     ]))
-
-    #     t_main = Table([[t_left, t_right]], colWidths=[4.8*inch, 2.6*inch])
-    #     t_main.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 0), ('RIGHTPADDING', (0,0), (-1,-1), 0)]))
-    #     elements.append(t_main)
-    #     elements.append(Spacer(1, 15))
-
-    #     # --- 3. ITEMS TABLE ---
-    #     print_cols = [c for c in self.columns_config if c.get('printable', True)]
-    #     headers = [Paragraph(f"<b>{c['label']}</b>", norm_style) for c in print_cols]
-    #     data = [headers]
-    #     for item in self.items_data:
-    #         row = []
-    #         for c in print_cols:
-    #             val = item.get(c['id'], "")
-    #             if c['type'] in ['number', 'calc', 'global_pct']:
-    #                 try: val = f"{float(val):,.2f}"
-    #                 except: pass
-    #             row.append(str(val))
-    #         data.append(row)
-        
-    #     if len(print_cols) > 0:
-    #         col_w = (7.5*inch) / len(print_cols)
-    #         t_items = Table(data, colWidths=[col_w]*len(print_cols))
-    #         t_items.setStyle(TableStyle([
-    #             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-    #             ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-    #             ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-    #             ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
-    #         ]))
-    #         elements.append(t_items)
-        
-    #     grand = self.total_lbl.cget("text").split("Grand Total:")[1].strip() if "Grand Total:" in self.total_lbl.cget("text") else self.total_lbl.cget("text")
-    #     t_total = Table([[Paragraph("<b>Grand Total:</b>", norm_style), Paragraph(f"<b>{grand}</b>", norm_style)]], colWidths=[6.0*inch, 1.5*inch])
-    #     t_total.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'RIGHT'), ('LINEABOVE', (0,0), (-1,-1), 1, colors.black)]))
-    #     elements.append(t_total)
-    #     elements.append(Spacer(1, 0.2*inch))
-
-    #     # --- 4. DYNAMIC FOOTER ---
-    #     def cb(val, label):
-    #         mark = "<b>[ X ]</b>" if val else "[   ]"
-    #         return Paragraph(f'<font name="Courier">{mark}</font> {label}', ParagraphStyle('cb', parent=norm_style, fontSize=9))
-    #     def b(txt): return Paragraph(f"<b>{txt}</b>", ParagraphStyle('b', parent=norm_style, fontSize=9))
-    #     def n(txt): return Paragraph(f"{txt}", ParagraphStyle('n', parent=norm_style, fontSize=9))
-
-    #     grid_style = [('GRID', (0,0), (-1,-1), 0.5, colors.black), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LEFTPADDING', (0,0), (-1,-1), 5)]
-
-    #     # Row 1: Purpose
-    #     p_row = [b("Purpose:"), cb(self.purpose_sale_var.get(), "Sale"), cb(self.purpose_job_var.get(), "Job"), cb(self.purpose_ret_var.get(), "Ret"), cb(self.purpose_nonret_var.get(), "Non-Ret")]
-    #     t1 = Table([p_row], colWidths=[1.5*inch]*5)
-    #     t1.setStyle(TableStyle(grid_style))
-    #     elements.append(t1)
-
-    #     # Row 2: Declaration
-    #     d_row = [b("Declaration:"), Paragraph("Goods delivered in good condition.", ParagraphStyle('d', parent=norm_style, fontSize=9))]
-    #     t2 = Table([d_row], colWidths=[1.5*inch, 6.0*inch]) 
-    #     t2.setStyle(TableStyle(grid_style))
-    #     elements.append(t2)
-
-    #     # Row 3: Source
-    #     s_row = [b("Source:"), cb(self.source_public_var.get(), "Public"), cb(self.source_special_var.get(), "Special"), cb(self.source_other_var.get(), "Other"), ""]
-    #     t3 = Table([s_row], colWidths=[1.5*inch]*5)
-    #     t3.setStyle(TableStyle(grid_style))
-    #     elements.append(t3)
-
-    #     # Row 4: Mode
-    #     if self.source_public_var.get():
-    #         m_row = [b("Mode:"), cb(self.mode_cargo_var.get(), "Cargo"), cb(self.mode_courier_var.get(), "Courier"), cb(self.mode_rail_var.get(), "Rail/Air"), cb(self.mode_air_var.get(), "Other")]
-    #         t_mode = Table([m_row], colWidths=[1.5*inch]*5)
-    #         t_mode.setStyle(TableStyle(grid_style))
-    #         elements.append(t_mode)
-
-    #         any_mode = (self.mode_cargo_var.get() or self.mode_courier_var.get() or self.mode_rail_var.get() or self.mode_air_var.get())
-    #         if any_mode:
-    #             c_h = ["", b("Transport Name"), b("Bilty #"), b("Date"), b("Charges"), b("Address")]
-    #             c_v = ["", n(self.trans_by_var.get()), n(self.bilty_no_var.get()), n(self.booking_date_var.get()), n(self.trans_charges_var.get()), n(self.cargo_address_var.get())]
-    #             t_cargo = Table([c_h, c_v], colWidths=[0.1*inch, 1.4*inch, 1.5*inch, 1.5*inch, 1.0*inch, 2.0*inch])
-    #             c_style = grid_style.copy(); c_style.append(('BACKGROUND', (0,0), (-1,0), colors.whitesmoke))
-    #             t_cargo.setStyle(TableStyle(c_style))
-    #             elements.append(t_cargo)
-
-    #     # Row 5: Special
-    #     if self.source_special_var.get():
-    #         v_row = [b("Special Vehicle:"), b(f"Vehicle No: {self.vehicle_num_var.get()}"), b(f"Date: {self.trans_date_var.get()}"), b(f"Driver/CNIC: {self.driver_cnic_var.get()}")]
-    #         t_veh = Table([v_row], colWidths=[1.5*inch, 2.0*inch, 2.0*inch, 2.0*inch])
-    #         t_veh.setStyle(TableStyle(grid_style))
-    #         elements.append(t_veh)
-
-    #     elements.append(Spacer(1, 10))
-
-    #     # --- 5. SIGNATURES & LOGOS ---
-    #     del_logo = Spacer(1, 30)
-    #     if self.delivered_logo_path:
-    #         logo_obj = self._get_scaled_image(self.delivered_logo_path, 1.2)
-    #         if logo_obj: del_logo = logo_obj
-
-    #     headers = [b("Received By"), b("Signature"), b("Delivered By"), b("Admin Signature")]
-    #     content = [Spacer(1, 40), Spacer(1, 40), del_logo, Spacer(1, 40)]
-    #     t_sig = Table([headers, content], colWidths=[1.875*inch]*4)
-    #     t_sig.setStyle(TableStyle([
-    #         ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-    #         ('VALIGN', (0,0), (-1,-1), 'TOP'),
-    #         ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-    #         ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke)
-    #     ]))
-    #     elements.append(t_sig)
-    #     elements.append(Spacer(1, 5))
-        
-    #     sys_gen_style = ParagraphStyle('SysGen', parent=styles['Normal'], fontSize=7, alignment=TA_CENTER, textColor=colors.grey)
-    #     elements.append(Paragraph("This is a system generated document so no need to sign.", sys_gen_style))
-
-    #     # --- 6. CANVAS SETUP (QR & FOOTER LOGO) ---
-    #     qr_img = self._generate_qr_code("https://www.orientmarketing.com.pk/", size_inch=0.8)
-    #     footer_logo_obj = None
-    #     if self.footer_logo_path:
-    #         footer_logo_obj = self._get_scaled_image(self.footer_logo_path, self.f_logo_size_var.get())
-
-    #     def canvas_setup(canvas, doc):
-    #         canvas.saveState()
-    #         canvas.setFont("Helvetica", 8)
-    #         canvas.drawRightString(A4[0]-20, 20, f"Page {canvas.getPageNumber()}")
-    #         if qr_img: qr_img.drawOn(canvas, A4[0] - MARGIN - 0.8*inch, MARGIN + 0.05*inch)
-
-    #         try:
-    #             icon_size = 0.30*inch; social_x = MARGIN; social_y = MARGIN + 0.05*inch; spacing = 0.05*inch
-    #             colors_list = [('#0066cc', 'W', 'https://www.orientmarketing.com.pk/'), ('#FF0000', 'Y', 'https://www.youtube.com/@Antarc-Technologies'), ('#1877F2', 'f', 'https://www.facebook.com/orientmarketing.com.pk'), ('#E4405F', 'I', 'https://www.instagram.com/orientmarketinghvac/')]
-    #             for idx, (color, symbol, url) in enumerate(colors_list):
-    #                 x_pos = social_x + idx * (icon_size + spacing)
-    #                 canvas.setFillColor(color); canvas.rect(x_pos, social_y, icon_size, icon_size, fill=1, stroke=0)
-    #                 canvas.setFillColor(colors.white); canvas.setFont("Helvetica-Bold", 14)
-    #                 canvas.drawString(x_pos + icon_size/2 - 5, social_y + icon_size/2 - 5, symbol)
-    #                 canvas.linkURL(url, (x_pos, social_y, x_pos + icon_size, social_y + icon_size), relative=0)
-    #         except: pass
-
-    #         if footer_logo_obj:
-    #             try:
-    #                 w, h = footer_logo_obj.drawWidth, footer_logo_obj.drawHeight
-    #                 align = self.footer_align_var.get()
-    #                 y_pos = 45 
-    #                 if align == "Center": x_pos = (A4[0] - w) / 2
-    #                 elif align == "Right": x_pos = A4[0] - MARGIN - w
-    #                 else: x_pos = MARGIN
-    #                 footer_logo_obj.drawOn(canvas, x_pos, y_pos)
-    #             except: pass
-    #         canvas.restoreState()
+    
 
     #     doc.build(elements, onFirstPage=canvas_setup, onLaterPages=canvas_setup)
-    def _generate_pdf(self, path):
+    def _generate_pdf(self, path, pre_fetched_terms=None, ui_data_payload=None):
         if not os.path.dirname(path): return
 
-        # ✅ 1. STYLES (Sab se pehle define karein)
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, KeepTogether
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
+        from reportlab.lib.units import inch
+        from reportlab.lib import colors
+
+        # Use pre-fetched data if provided (thread-safe), otherwise fall back to self
+        if ui_data_payload:
+            d = ui_data_payload
+        else:
+            # Fallback: read from self
+            d = {
+                "quotation_no": self.quotation_no_var.get(),
+                "doc_date": self.doc_date_var.get(),
+                "rfq_no": self.rfq_no_var.get(),
+                "ref_quot_no": self.ref_quot_no_var.get(),
+                "client_name": self.client_name_var.get(),
+                "client_stn": self.client_stn_var.get(),
+                "dc_no": self.dc_no_var.get(),
+                "client_addr": self.client_addr_var.get(),
+                "client_ntn": self.client_ntn_var.get(),
+                "vendor_stn": self.vendor_stn_var.get(),
+                "client_contact": self.client_contact_var.get(),
+                "delivery_date": self.delivery_date_var.get(),
+                "vendor_ntn": self.vendor_ntn_var.get(),
+                "client_designation": self.client_designation_var.get(),
+                "delivered_through": self.delivered_through_var.get(),
+                "vendor_pra": self.vendor_pra_var.get(),
+                "client_email": self.client_email_var.get(),
+                "vendor_email": self.vendor_email_var.get(),
+                "left_header": self.left_header_title.get(),
+                "right_header": self.right_header_title.get(),
+                "tagged_terms": pre_fetched_terms or "",
+                "footer_logo_size": self.f_logo_size_var.get(),
+                "footer_align": self.footer_align_var.get(),
+                "items_data": self.items_data,
+                # Logos paths added to fallback for safety
+                "header_logo_path": self.header_logo_path,
+                "header_logo_right_path": self.header_logo_right_path
+            }
+
+        # ✅ 1. STYLES
         styles = getSampleStyleSheet()
         norm_style = styles['Normal']
         
@@ -814,17 +799,16 @@ class DeliveryChallanApp(QuotationApp):
 
         # 2. TEMPLATE SETUP
         MARGIN = 20 
-        # Bottom margin barhaya gaya hai safety ke liye
         doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=MARGIN, leftMargin=MARGIN, 
-                                topMargin=1.3*inch, bottomMargin=80) 
+                                topMargin=0.4*inch, bottomMargin=80) 
         elements = []
         
-        # --- 3. HEADER SECTION ---
-        # (Aapka maujooda header logic...)
-        img_left = self._get_scaled_image(self.header_logo_path, 1.2)
-        img_right = self._get_scaled_image(self.header_logo_right_path, 1.2)
+        # --- 3. HEADER SECTION (Corrected to use d.get) ---
+        img_left = self._get_scaled_image(d.get('header_logo_path'), 1.2)
+        img_right = self._get_scaled_image(d.get('header_logo_right_path'), 1.2)
+        
         center_html = f"""<font size="24" name="Helvetica-Bold">DELIVERY CHALLAN</font><br/>
-                          <font size="10" name="Helvetica"><b>Invoice No:</b> {self.quotation_no_var.get()} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Date:</b> {self.doc_date_var.get()}</font>"""
+                          <font size="10" name="Helvetica"><b>Invoice No:</b> {d['quotation_no']} &nbsp;&nbsp;|&nbsp;&nbsp; <b>Date:</b> {d['doc_date']}</font>"""
         center_style = ParagraphStyle('Center', parent=norm_style, alignment=TA_CENTER, leading=25)
         
         cw = 540
@@ -834,37 +818,87 @@ class DeliveryChallanApp(QuotationApp):
         elements.append(t_head)
         elements.append(Spacer(1, 15))
 
-        # --- 4. INFO TABLES (Client/Vendor) ---
-        # (Aapka maujooda info tables logic...)
-        def mk_b(txt): return Paragraph(f"<b>{txt}</b>", ParagraphStyle('b', parent=norm_style, fontSize=9))
-        def mk_n(txt): return Paragraph(f"{txt}", ParagraphStyle('n', parent=norm_style, fontSize=9))
+        # --- 4. CONSOLIDATED INFO TABLE ---
+        def mk_b(txt): return Paragraph(f"<b>{txt}</b>", ParagraphStyle('b', parent=norm_style, fontSize=8))
+        def mk_n(txt): return Paragraph(str(txt or ""), ParagraphStyle('n', parent=norm_style, fontSize=8))
         title_b = ParagraphStyle('tb', parent=norm_style, fontSize=10, alignment=TA_CENTER, fontName='Helvetica-Bold')
 
-        l_widths = [60, 115, 65, 105] # Sum = 345
-        l_rows = [
-            [Paragraph(self.left_header_title.get(), title_b), "", "", ""],
-            [mk_b("DC No:"), mk_n(self.quotation_no_var.get()), mk_b("PO No."), mk_n(self.rfq_no_var.get())],
-            [mk_b("Customer:"), mk_n(self.client_name_var.get()), mk_b("S.T.N. NO:"), mk_n(self.client_stn_var.get())],
-            [mk_b("Address:"), mk_n(self.client_addr_var.get()), mk_b("NTN:"), mk_n(self.client_ntn_var.get())],
-            [mk_b("Contact person:"), mk_n(self.client_contact_var.get()), mk_b("Delivery date:"), mk_n(self.delivery_date_var.get())],
-            [mk_b("Designation:"), mk_n(self.client_designation_var.get()), mk_b("Delivered Through:"), mk_n(self.delivered_through_var.get())],
-            [mk_b("email:"), mk_n(self.client_email_var.get()), "", ""]
+        # info_widths = [65, 120, 65, 95, 75, 120] 
+        
+        # info_data = [
+        #     [Paragraph(d['left_header'], title_b), "", "", "", Paragraph(d['right_header'], title_b), ""],
+        #     [mk_b("DC No:"), mk_n(d['quotation_no']), mk_b("PO No."), mk_n(d['rfq_no']), mk_b("Quotation No."), mk_n(d['ref_quot_no'])],
+        #     [mk_b("Customer:"), mk_n(d['client_name']), mk_b("S.T.N. NO:"), mk_n(d['client_stn']), mk_b("DC No"), mk_n(d['dc_no'])],
+        #     [mk_b("Address:"), mk_n(d['client_addr']), mk_b("NTN:"), mk_n(d['client_ntn']), mk_b("S.T.N. No."), mk_n(d['vendor_stn'])],
+        #     [mk_b("Contact person:"), mk_n(d['client_contact']), mk_b("Delivery date:"), mk_n(d['delivery_date']), mk_b("NTN:"), mk_n(d['vendor_ntn'])],
+        #     [mk_b("Designation:"), mk_n(d['client_designation']), mk_b("Delivered Through:"), mk_n(d['delivered_through']), mk_b("PRA:"), mk_n(d['vendor_pra'])],
+        #     [mk_b("email:"), mk_n(d['client_email']), "", "", mk_b("email:"), mk_n(d['vendor_email'])]
+        # ]
+        
+        # t_info = Table(info_data, colWidths=info_widths)
+        # t_info.setStyle(TableStyle([
+        #     ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        #     ('SPAN', (0,0), (3,0)), 
+        #     ('SPAN', (4,0), (5,0)), 
+        #     ('SPAN', (1,6), (3,6)),
+        #     ('BACKGROUND', (0,0), (3,0), colors.whitesmoke), 
+        #     ('BACKGROUND', (4,0), (5,0), colors.whitesmoke), 
+        #     ('BACKGROUND', (0,1), (0,-1), colors.whitesmoke), 
+        #     ('BACKGROUND', (2,1), (2,-2), colors.whitesmoke), 
+        #     ('BACKGROUND', (4,1), (4,-1), colors.whitesmoke), 
+        #     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        #     ('ALIGN', (0,0), (-1,0), 'CENTER'),
+        # ]))
+        # elements.append(t_info)
+        # elements.append(Spacer(1, 15))
+
+        # Weights: [LabelL, ValL, LabelL2, ValL2, LabelR, ValR]
+        # Total Content Width (CW) = 540
+        info_widths = [65, 120, 65, 95, 75, 120] # Sum = 540
+        
+        info_data = [
+            # Row 0: Headers
+            [Paragraph(d['left_header'], title_b), "", "", "", Paragraph(d['right_header'], title_b), ""],
+            # Row 1: DC No, PO No, Quot No
+            [mk_b("DC No:"), mk_n(d['quotation_no']), mk_b("PO No."), mk_n(d['rfq_no']), mk_b("Quotation No."), mk_n(d['ref_quot_no'])],
+            # Row 2: Customer, STN, DC No (Vendor)
+            [mk_b("Customer:"), mk_n(d['client_name']), mk_b("S.T.N. NO:"), mk_n(d['client_stn']), mk_b("DC No"), mk_n(d['dc_no'])],
+            # Row 3: Address, NTN, STN (Vendor)
+            [mk_b("Address:"), mk_n(d['client_addr']), mk_b("NTN:"), mk_n(d['client_ntn']), mk_b("S.T.N. No."), mk_n(d['vendor_stn'])],
+            # Row 4: Contact, Del Date, NTN (Vendor)
+            [mk_b("Contact person:"), mk_n(d['client_contact']), mk_b("Delivery date:"), mk_n(d['delivery_date']), mk_b("NTN:"), mk_n(d['vendor_ntn'])],
+            # Row 5: Designation, Through, PRA
+            [mk_b("Designation:"), mk_n(d['client_designation']), mk_b("Delivered Through:"), mk_n(d['delivered_through']), mk_b("PRA:"), mk_n(d['vendor_pra'])],
+            # Row 6: email (Client), email (Vendor)
+            [mk_b("email:"), mk_n(d['client_email']), "", "", mk_b("email:"), mk_n(d['vendor_email'])]
         ]
-        t_left = Table(l_rows, colWidths=l_widths)
-        t_left.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-
-        r_widths = [70, 125] # Sum = 195. Total 345 + 195 = 540 (CW)
-        r_rows = [[Paragraph(self.right_header_title.get(), title_b), ""], [mk_b("Quotation No."), mk_n(self.ref_quot_no_var.get())], [mk_b("DC No"), mk_n(self.dc_no_var.get())], [mk_b("S.T.N. No."), mk_n(self.vendor_stn_var.get())], [mk_b("NTN:"), mk_n(self.vendor_ntn_var.get())], [mk_b("PRA:"), mk_n(self.vendor_pra_var.get())], [mk_b("email:"), mk_n(self.vendor_email_var.get())]]
-        t_right = Table(r_rows, colWidths=r_widths)
-        t_right.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-
-        elements.append(Table([[t_left, t_right]], colWidths=[345, 195], style=[('VALIGN', (0,0), (-1,-1), 'TOP')]))
+        
+        t_info = Table(info_data, colWidths=info_widths)
+        t_info.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            # Spans for Headers
+            ('SPAN', (0,0), (3,0)), # Client Header
+            ('SPAN', (4,0), (5,0)), # Vendor Header
+            # Span for email
+            ('SPAN', (1,6), (3,6)),
+            # Stylish backgrounds
+            ('BACKGROUND', (0,0), (3,0), colors.whitesmoke), # Client Header BG
+            ('BACKGROUND', (4,0), (5,0), colors.whitesmoke), # Vendor Header BG
+            # Label backgrounds
+            ('BACKGROUND', (0,1), (0,-1), colors.whitesmoke), # Col 0 labels
+            ('BACKGROUND', (2,1), (2,-2), colors.whitesmoke), # Col 2 labels 
+            ('BACKGROUND', (4,1), (4,-1), colors.whitesmoke), # Col 4 labels
+            # Alignments
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('ALIGN', (0,0), (-1,0), 'CENTER'),
+        ]))
+        elements.append(t_info)
         elements.append(Spacer(1, 15))
 
         # --- 5. ITEMS TABLE ---
         print_cols = [c for c in self.columns_config if c.get('printable', True)]
         data = [[Paragraph(f"<b>{c['label']}</b>", head_style) for c in print_cols]]
-        for item in self.items_data:
+        for item in d['items_data']:
             row = []
             for c in print_cols:
                 val = item.get(c['id'], "")
@@ -902,11 +936,6 @@ class DeliveryChallanApp(QuotationApp):
             ]))
             elements.append(t_items)
         
-        grand = self.total_lbl.cget("text").split("Net Amount:")[1].strip() if "Net Amount:" in self.total_lbl.cget("text") else "0.00"
-        # 540 Total (CW) for symmetry: 420 + 120 = 540
-        elements.append(Table([[Paragraph("<b>Net Amount (PKR):</b>", item_num), Paragraph(f"<b>{grand}</b>", item_num)]], 
-                              colWidths=[420, 120], 
-                              style=[('ALIGN', (0,0), (-1,-1), 'RIGHT'), ('LINEABOVE', (1,0), (1,0), 1, colors.black)]))
         elements.append(Spacer(1, 15))
 
         # ✅ 6. TRANSPORT & SIGNATURES (SPECIAL MODE FIX & TICK MARK)
@@ -922,8 +951,8 @@ class DeliveryChallanApp(QuotationApp):
         elements.append(Table([[mk_b("Purpose:"), 
                                Paragraph(f"{get_tick(self.purpose_sale_var.get()).text} Sale", item_norm), 
                                Paragraph(f"{get_tick(self.purpose_job_var.get()).text} Job", item_norm), 
-                               Paragraph(f"{get_tick(self.purpose_ret_var.get()).text} Ret", item_norm), 
-                               Paragraph(f"{get_tick(self.purpose_nonret_var.get()).text} Non-Ret", item_norm)]], 
+                               Paragraph(f"{get_tick(self.purpose_ret_var.get()).text} Returnable", item_norm), 
+                               Paragraph(f"{get_tick(self.purpose_nonret_var.get()).text} Non-Returnable", item_norm)]], 
                              colWidths=[1.4*inch, 1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch], style=grid_style))
         
         elements.append(Table([[mk_b("Declaration:"), Paragraph("Goods delivered in good condition.", item_norm)]], colWidths=[1.4*inch, 6.0*inch], style=grid_style))
@@ -953,21 +982,24 @@ class DeliveryChallanApp(QuotationApp):
             t_cargo.setStyle(TableStyle(grid_style + [('BACKGROUND', (0,0), (-1,0), colors.whitesmoke)]))
             elements.append(t_cargo)
 
-        # Signatures section
+        # Signatures section (Use pre-fetched logo path)
         sig_hd = [mk_b("Received By"), mk_b("Signature"), mk_b("Delivered By"), mk_b("Admin Signature")]
-        sig_ct = [Spacer(1, 45), Spacer(1, 45), (self._get_scaled_image(self.delivered_logo_path, 1.2) if self.delivered_logo_path else Spacer(1, 30)), Spacer(1, 45)]
+        delivered_logo = self._get_scaled_image(d.get('delivered_logo_path'), 1.2) if d.get('delivered_logo_path') else Spacer(1, 30)
+        # sig_ct = [Spacer(1, 45), Spacer(1, 45), delivered_logo, Spacer(1, 45)]
+        sig_ct = [Spacer(1, 45), Spacer(1, 45), delivered_logo, Spacer(1, 45)]
         t_sig = Table([sig_hd, sig_ct], colWidths=[1.85*inch]*4, style=[('GRID', (0,0), (-1,-1), 0.5, colors.black), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke)])
         
         # Wrapping signatures in KeepTogether to keep them on one page
         from reportlab.platypus import KeepTogether
         elements.append(KeepTogether([t_sig, Spacer(1, 8), Paragraph("Note: This is a system generated document so no need to sign.", red_note_style)]))
 
-        # ✅ 7. CANVAS SETUP (QR & Social Links)
+        # ✅ 7. CANVAS SETUP (QR & Social Links) - Use pre-fetched footer logo path
         # (Aapka maujooda canvas_setup logic...)
         qr_link = "https://www.orientmarketing.com.pk/"
         qr_img = self._generate_qr_code(qr_link, size_inch=0.4) 
-        footer_logo_obj = self._get_scaled_image(self.footer_logo_path, self.f_logo_size_var.get()) if self.footer_logo_path else None
-
+        # footer_logo_obj = self._get_scaled_image(d.get('footer_logo_path'), d['footer_logo_size']) if d.get('footer_logo_path') else None
+        footer_logo_path = d.get('footer_logo_path')
+        footer_logo_obj = self._get_scaled_image(footer_logo_path, d['footer_logo_size']) if footer_logo_path else None
         def canvas_setup(canvas, doc):
             canvas.saveState()
             if qr_img:
@@ -985,9 +1017,9 @@ class DeliveryChallanApp(QuotationApp):
 
             if footer_logo_obj:
                 w = footer_logo_obj.drawWidth
-                align = self.footer_align_var.get()
+                align = d['footer_align']
                 x_pos = (A4[0]-w)/2 if align == "Center" else (A4[0]-MARGIN-w if align == "Right" else MARGIN)
-                footer_logo_obj.drawOn(canvas, x_pos, 40)
+                footer_logo_obj.drawOn(canvas, x_pos, 10)
             canvas.restoreState()
 
         doc.build(elements, onFirstPage=canvas_setup, onLaterPages=canvas_setup)
@@ -1048,9 +1080,12 @@ class DeliveryChallanApp(QuotationApp):
         top.title(f"Select from {table_name.replace('_', ' ').title()}")
         top.geometry("700x400")
         
+        # Use make_scrollable Utility
+        scrollable_content = self.make_scrollable(top)
+
         # 2. Treeview (List) Banao
         cols = ("ID", "Inv No", "Client", "Date", "Total")
-        tree = ttk.Treeview(top, columns=cols, show='headings', selectmode='browse')
+        tree = ttk.Treeview(scrollable_content, columns=cols, show='headings', selectmode='browse', height=10)
         
         tree.heading("ID", text="ID"); tree.column("ID", width=50)
         tree.heading("Inv No", text="Doc No"); tree.column("Inv No", width=120)
@@ -1103,7 +1138,7 @@ class DeliveryChallanApp(QuotationApp):
             self.load_invoice_by_id(table_name, selected_id)
             top.destroy()
 
-        ttk.Button(top, text="Import/Load Selected Data", command=on_select).pack(pady=10)
+        ttk.Button(scrollable_content, text="Import/Load Selected Data", command=on_select).pack(pady=10)
 
 
 
@@ -1191,7 +1226,7 @@ class DeliveryChallanApp(QuotationApp):
 
         # Saved custom fields add karein
         saved_extras = trans.get("custom_fields", [])
-        if self.add_custom_field_func: # Check agar function exist karta hai
+        if hasattr(self, 'add_custom_field_func') and self.add_custom_field_func:
             for lbl, val in saved_extras:
                 self.add_custom_field_func(lbl, val)
 

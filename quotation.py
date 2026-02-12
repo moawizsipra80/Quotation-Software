@@ -19,6 +19,17 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
 import ttkbootstrap as tb # Keep tb as an alias for safety
+import smtplib
+import ssl
+import random
+from ctypes import windll
+
+try:
+    # Fix for high DPI screens on Windows
+    windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
+
 
 import ui_styles as style
 from theme_manager import ThemeManager
@@ -66,6 +77,177 @@ except ImportError:
     pass
 
 class QuotationApp:
+
+    def perform_login(self, user_data=None):
+        if user_data:
+            self.root.deiconify()
+            self.current_username = user_data[1]
+            
+            # Load Profile Pic Path if available
+            try:
+                self.cursor.execute("SELECT profile_pic_path, theme_preference FROM users WHERE username=?", (self.current_username,))
+                urow = self.cursor.fetchone()
+                if urow:
+                    self.current_user_pic_path = urow[0]
+                    theme = urow[1] if urow[1] else "cosmo"
+                    self.style = ThemeManager.apply_theme(self.root, theme)
+            except Exception as e:
+                print(f"Login data fetch error: {e}")
+                self.current_user_pic_path = None
+
+            # Initialize Dashboard
+            from dashboard import DashboardPanel
+            # If dashboard already exists destroy it to be safe
+            if self.current_dashboard:
+                try: 
+                    if hasattr(self.current_dashboard, 'destroy'): self.current_dashboard.destroy()
+                    elif hasattr(self.current_dashboard, 'frame'): self.current_dashboard.frame.destroy()
+                except: pass
+            
+            self.current_dashboard = DashboardPanel(self)
+            return 
+
+        self.root.withdraw()
+        
+        # --- NEW PROFESSIONAL LOGIN DESIGN ---
+        login_win = tk.Toplevel(self.root)
+        login_win.title("ODM Secure Login")
+        login_win.state('zoomed')
+        login_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
+
+        # Colors (Matching Splash)
+        BG_COLOR = "#0f172a"
+        CARD_BG = "#1e293b"
+        ACCENT_COLOR = "#38bdf8"
+        TEXT_WHITE = "#f8fafc"
+        TEXT_GREY = "#94a3b8"
+        INPUT_BG = "#334155"
+        BORDER_COLOR = "#475569"
+
+        login_win.configure(bg=BG_COLOR)
+
+        # Main Container (Center)
+        container = tk.Frame(login_win, bg=BG_COLOR)
+        container.place(relx=0.5, rely=0.5, anchor='center')
+
+        # Card
+        card = tk.Frame(container, bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER_COLOR, padx=40, pady=40)
+        card.pack()
+
+        # 1. LOGO
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = ["splash_logo.png", "logo.png", "logo.jpg", "logo.jpeg", "logo.ico"]
+        found_logo = None
+        for c in candidates:
+            p = os.path.join(script_dir, c)
+            if os.path.exists(p):
+                found_logo = p
+                break
+        
+        if found_logo:
+            try:
+                pil_img = Image.open(found_logo)
+                pil_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                logo_img = ImageTk.PhotoImage(pil_img)
+                l = tk.Label(card, image=logo_img, bg=CARD_BG)
+                l.image = logo_img
+                l.pack(pady=(0, 20))
+            except: pass
+
+        # 2. HEADER
+        tk.Label(card, text="WELCOME BACK", font=("Segoe UI", 24, "bold"), fg=TEXT_WHITE, bg=CARD_BG).pack(pady=(0, 5))
+        tk.Label(card, text="Login to your account to continue", font=("Segoe UI", 10), fg=TEXT_GREY, bg=CARD_BG).pack(pady=(0, 30))
+
+        # 3. INPUT FIELDS
+        def create_styled_entry(parent, label_text, show_char=None):
+            tk.Label(parent, text=label_text, font=("Segoe UI", 10, "bold"), fg=ACCENT_COLOR, bg=CARD_BG).pack(anchor='w', pady=(10, 5))
+            e_frame = tk.Frame(parent, bg=INPUT_BG, highlightthickness=1, highlightbackground=BORDER_COLOR)
+            e_frame.pack(fill='x', ipady=5)
+            ent = tk.Entry(e_frame, bg=INPUT_BG, fg="white", font=("Segoe UI", 11), relief='flat', insertbackground='white')
+            if show_char: ent.config(show=show_char)
+            ent.pack(fill='x', padx=10, pady=3)
+            return ent
+
+        u_ent = create_styled_entry(card, "USERNAME")
+        p_ent = create_styled_entry(card, "PASSWORD", "*")
+
+        # 4. REMEMBER ME & FORGOT PASS ROW
+        opts_frame = tk.Frame(card, bg=CARD_BG)
+        opts_frame.pack(fill='x', pady=20)
+
+        self.remember_me_var = tk.BooleanVar(value=False)
+        rem_file = os.path.join(os.getenv('APPDATA'), "odm_remember.json")
+
+        cb = tk.Checkbutton(opts_frame, text="Remember Me", variable=self.remember_me_var, 
+                            bg=CARD_BG, fg=TEXT_GREY, selectcolor=BG_COLOR, activebackground=CARD_BG, activeforeground=TEXT_WHITE, font=("Segoe UI", 9))
+        cb.pack(side='left')
+
+        lbl_forgot = tk.Label(opts_frame, text="Forgot Password?", font=("Segoe UI", 9, "bold"), fg=ACCENT_COLOR, bg=CARD_BG, cursor="hand2")
+        lbl_forgot.pack(side='right')
+        lbl_forgot.bind("<Button-1>", lambda e: self.forgot_password_flow(u_ent.get().strip(), login_win))
+
+        # 5. LOADING SAVED CREDENTIALS
+        try:
+            if os.path.exists(rem_file):
+                with open(rem_file, 'r') as f:
+                    saved = json.load(f)
+                    u_ent.insert(0, saved.get('user', ''))
+                    p_ent.insert(0, saved.get('pass', ''))
+                    self.remember_me_var.set(True)
+        except: pass
+
+        # 6. ACTION BUTTONS
+        def on_enter(e): btn_login.config(bg="#0ea5e9") 
+        def on_leave(e): btn_login.config(bg=ACCENT_COLOR)
+
+        def try_login():
+            username = u_ent.get().strip()
+            password = p_ent.get().strip()
+            
+            # Visual Feedback
+            btn_login.config(text="VERIFYING...", state='disabled')
+            login_win.update()
+
+            self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+            row = self.cursor.fetchone()
+            
+            if row:
+                try:
+                    if self.remember_me_var.get():
+                        with open(rem_file, 'w') as f: json.dump({'user': username, 'pass': password}, f)
+                    elif os.path.exists(rem_file):
+                        os.remove(rem_file)
+                except: pass
+                
+                login_win.destroy()
+                self.perform_login(row)
+            else:
+                btn_login.config(text="LOGIN", state='normal')
+                messagebox.showerror("Login Failed", "Invalid Username or Password", parent=login_win)
+                btn_login.config(text="LOGIN", state='normal')
+
+        btn_login = tk.Button(card, text="LOGIN", font=("Segoe UI", 12, "bold"), bg=ACCENT_COLOR, fg=BG_COLOR, 
+                              relief='flat', cursor="hand2", command=try_login)
+        btn_login.pack(fill='x', pady=(10, 20), ipady=5)
+        btn_login.bind("<Enter>", on_enter)
+        btn_login.bind("<Leave>", on_leave)
+
+        # 7. FOOTER ACTIONS (Trial & Setup)
+        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        if not os.path.exists(license_path):
+            count = self.get_trial_count()
+            rem = 2 - count
+            tk.Label(card, text=f"⚠️ TRIAL MODE: {rem} Quotations Left", fg="#fbbf24", bg=CARD_BG, font=("Segoe UI", 9, "bold")).pack(pady=(0, 15))
+
+        tk.Label(card, text="Don't have a profile?", fg=TEXT_GREY, bg=CARD_BG, font=("Segoe UI", 9)).pack(pady=(10, 5))
+        
+        btn_setup = tk.Label(card, text="Setup New Profile", font=("Segoe UI", 10, "bold"), fg=ACCENT_COLOR, bg=CARD_BG, cursor="hand2")
+        btn_setup.pack()
+        btn_setup.bind("<Button-1>", lambda e: [login_win.destroy(), self.perform_setup()])
+
+        # Footer Copyright
+        tk.Label(login_win, text="© 2026 ODM Online System", font=("Segoe UI", 8), fg=BORDER_COLOR, bg=BG_COLOR).place(relx=0.5, rely=0.95, anchor='center')
+
     # =========================================================================
     # INITIALIZATION & STARTUP
     # =========================================================================
@@ -221,40 +403,300 @@ class QuotationApp:
             pass
         self.root.destroy()
 
-    def check_license(self):
-        app_data_dir = os.getenv('APPDATA')
-        my_folder = os.path.join(app_data_dir, "ODM_Quotation_Gen")
-        
-        if not os.path.exists(my_folder):
-            os.makedirs(my_folder)
-            
-        license_file = os.path.join(my_folder, "license.key")
-        machine_id = self.get_machine_id()
-        license_valid = False
-        
-        if os.path.exists(license_file):
-            try:
-                with open(license_file, "r") as f:
-                    saved_key = f.read()
-                    if self.validate_key(machine_id, saved_key):
-                        license_valid = True
-            except:
-                pass
-        
-        if not license_valid:
-            self.show_license_window(machine_id)
-        else:
-            self.check_user_login()
+    _cached_machine_id = None
 
     def get_machine_id(self):
+        """Hardware Lock: UUID or Motherboard Serial (Cached for performance)"""
+        if QuotationApp._cached_machine_id:
+            return QuotationApp._cached_machine_id
+
+        # Method 1: UUID (Reliable & Built-in)
         try:
-            cmd = 'wmic csproduct get uuid'
-            uuid = str(subprocess.check_output(cmd).decode().split('\n')[1].strip())
-            return uuid
-        except:
-            return "UNKNOWN-ID-ERROR"
+            import uuid
+            node = uuid.getnode()
+            if node:
+                res = f"MAC-{node}"
+                QuotationApp._cached_machine_id = res
+                return res
+        except: pass
+
+        # Method 2: WMIC (Fallback)
+        try:
+            # Try with full paths in case PATH is broken
+            for p in ["", "C:\\Windows\\System32\\wbem\\", "C:\\Windows\\SysWOW64\\wbem\\"]:
+                try:
+                    cmd = f'{p}wmic baseboard get serialnumber'
+                    serial = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode().split('\n')[1].strip()
+                    if serial and "Default" not in serial:
+                        QuotationApp._cached_machine_id = serial
+                        return serial
+                except: continue
+        except: pass
+
+        # Method 3: Final Fallback
+        res = "PC-ID-" + hashlib.md5(os.getlogin().encode()).hexdigest()[:10]
+        QuotationApp._cached_machine_id = res
+        return res
+
+    def get_sys_config_db(self):
+        """Hidden location for trial/sec config"""
+        path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+        if not os.path.exists(path): os.makedirs(path)
+        return os.path.join(path, "sys_config.db")
+
+    def init_sys_config(self):
+        """Init hidden DB and check current trial status"""
+        db_path = self.get_sys_config_db()
+        conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+        cursor = conn.cursor()
+        # Obfuscated table for security
+        cursor.execute("CREATE TABLE IF NOT EXISTS _sys_k (_k TEXT PRIMARY KEY, _v TEXT)")
+        
+        # HWID Tracking
+        hwid = self.get_machine_id()
+        cursor.execute("SELECT _v FROM _sys_k WHERE _k='hw_identity'")
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO _sys_k VALUES ('hw_identity', ?)", (hwid,))
+        
+        # Trial Counter (Obfuscated value)
+        cursor.execute("SELECT _v FROM _sys_k WHERE _k='_t_idx'")
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO _sys_k VALUES ('_t_idx', '0')") # Start with 0
+            
+        conn.commit()
+        conn.close()
+
+    def get_trial_count(self):
+        try:
+            conn = sqlite3.connect(self.get_sys_config_db(), timeout=30, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("SELECT _v FROM _sys_k WHERE _k='_t_idx'")
+            val = cursor.fetchone()
+            conn.close()
+            return int(val[0]) if val else 0
+        except: return 0
+
+    def increment_trial(self):
+        try:
+            count = self.get_trial_count() + 1
+            conn = sqlite3.connect(self.get_sys_config_db(), timeout=30, check_same_thread=False)
+            cursor = conn.cursor()
+            cursor.execute("UPDATE _sys_k SET _v=? WHERE _k='_t_idx'", (str(count),))
+            conn.commit()
+            conn.close()
+            return count
+        except: return 2 # If fail, stop app safely
+
+    def check_license(self):
+        """Entry point for licensing: Checks if activated, else shows Options"""
+        self.init_sys_config()
+        
+        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        machine_id = self.get_machine_id()
+        
+        if os.path.exists(license_path):
+            with open(license_path, "r") as f:
+                saved = f.read().strip()
+                if self.validate_key(machine_id, saved):
+                    self.check_user_login() # Valid Full License
+                    return
+
+        # Not activated: Show Initial Options (Trial vs Account)
+        self.show_initial_popup()
+
+    def show_initial_popup(self):
+        self.root.withdraw()
+        pop = tk.Toplevel(self.root)
+        pop.title("Security Verification & Access")
+        pop.geometry("600x450")
+        # pop.resizable(False, False)
+        pop.config(bg="#2c3e50")
+        
+        def close_app():
+            self.root.destroy(); sys.exit()
+        pop.protocol("WM_DELETE_WINDOW", close_app)
+        
+        # Title
+        tk.Label(pop, text="Welcome to ODM Quoting System", font=("Segoe UI", 16, "bold"), bg="#2c3e50", fg="#00e676").pack(pady=30)
+        tk.Label(pop, text="Please choose how you want to proceed:", bg="#2c3e50", fg="white").pack()
+
+        btn_frame = ttk.Frame(pop, padding=20)
+        btn_frame.pack()
+
+        def start_trial():
+            count = self.get_trial_count()
+            if count >= 2:
+                # Automatic Backup on Expiry
+                if messagebox.askyesno("Trial Expired", "Your trial version has expired (2/2 Quotes).\n\nYou cannot create more documents. Would you like to BACKUP your data before the app closes?"):
+                    self.backup_database()
+                close_app()
+                return
+            
+            remaining = 2 - count
+            self.trial_mode_active = True 
+            messagebox.showinfo("Trial Mode", f"Trial Version Started!\nRemaining Quotations: {remaining}/2\nPlease Login or Setup Profile to continue.")
+            pop.destroy()
+            
+            # Fresh User Check
+            self.init_database() # Ensure DB is ready
+            self.cursor.execute("SELECT COUNT(*) FROM users")
+            if self.cursor.fetchone()[0] == 0:
+                self.perform_setup()
+            else:
+                self.perform_login()
+
+        def account_flow():
+            pop.destroy()
+            self.show_verification_step1()
+
+        ttk.Button(btn_frame, text="USE TRIAL VERSION", command=start_trial, bootstyle="secondary", width=30).pack(pady=10, ipady=5)
+        ttk.Button(btn_frame, text="I HAVE AN ACCOUNT", command=account_flow, bootstyle="success", width=30).pack(pady=10, ipady=5)
+        
+        tk.Label(scrollable_content, text=f"Machine ID: {self.get_machine_id()}", font=("Consolas", 8), bg="#2c3e50", fg="grey").pack(side="bottom", pady=10)
+
+    def show_verification_step1(self):
+        """Step 1: Admin Secret Key"""
+        win = tk.Toplevel(self.root)
+        win.title("Admin Verification")
+        win.geometry("500x350")
+        win.config(bg="#1a1a1a")
+        win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.show_initial_popup()])
+
+        # Use make_scrollable
+        scrollable_content = self.make_scrollable(win, bg="#1a1a1a")
+
+        tk.Label(scrollable_content, text="Verification Step 1", font=("bold", 14), bg="#1a1a1a", fg="white").pack(pady=20)
+        tk.Label(scrollable_content, text="Enter Admin Verification Key:", bg="#1a1a1a", fg="#bdc3c7").pack()
+        
+        key_ent = ttk.Entry(scrollable_content, show="*", width=35, justify='center')
+        key_ent.pack(pady=10)
+        key_ent.focus_set()
+
+        def verify_key():
+            # Private Developer Key
+            DEVELOPER_KEY = "ODM-PRO-VERIFY-2026"
+            
+            if key_ent.get().strip() == DEVELOPER_KEY:
+                win.destroy()
+                self.show_verification_step2()
+            else:
+                messagebox.showerror("Verification Error", "Invalid Admin Key!", parent=win)
+
+        ttk.Button(scrollable_content, text="Verify Key & Proceed", command=verify_key, bootstyle="info").pack(pady=20)
+
+    def show_verification_step2(self):
+        """Step 2: OTP Verification using User's own Gmail Engine"""
+        win = tk.Toplevel(self.root)
+        win.title("Security Activation - Gmail Verification")
+        win.geometry("500x550")
+        win.config(bg="#1a1a1a")
+        
+        # Use make_scrollable
+        scrollable_content = self.make_scrollable(win, bg="#1a1a1a")
+
+        # Generated OTP
+        self.current_otp = str(random.randint(100000, 999999))
+        
+        tk.Label(scrollable_content, text="Step 2: Gmail Identity Check", font=("Segoe UI", 15, "bold"), bg="#1a1a1a", fg="white").pack(pady=(20, 10))
+        tk.Label(scrollable_content, text="Enter your Gmail credentials to receive OTP\n(Software will use this to send you the code)", 
+                 bg="#1a1a1a", fg="#bdc3c7", font=("Arial", 9)).pack(pady=5)
+        
+        # Email Field
+        tk.Label(scrollable_content, text="Your Gmail Address:", bg="#1a1a1a", fg="white").pack(pady=(15, 0))
+        email_ent = ttk.Entry(scrollable_content, width=40, justify='center')
+        email_ent.pack(pady=5)
+        
+        # Password Field
+        tk.Label(scrollable_content, text="Your Gmail App Password (16-digits):", bg="#1a1a1a", fg="white").pack(pady=(10, 0))
+        pass_ent = ttk.Entry(scrollable_content, width=40, justify='center', show="*")
+        pass_ent.pack(pady=5)
+        tk.Label(scrollable_content, text="Note: Use 'App Password' from Google Security settings.", font=("Arial", 8), fg="#7f8c8d", bg="#1a1a1a").pack()
+
+        otp_label = tk.Label(scrollable_content, text="Enter 6-Digit OTP Received:", bg="#1a1a1a", fg="#27ae60", font=("bold", 11))
+        otp_ent = ttk.Entry(scrollable_content, width=20, justify='center', font=("Arial", 12, "bold"))
+        
+        def send_otp_email():
+            user_mail = email_ent.get().strip()
+            user_pass = pass_ent.get().strip()
+            
+            if not user_mail or not user_pass:
+                messagebox.showerror("Error", "Both Gmail and App Password are required!", parent=win)
+                return
+            
+            # Disable button to prevent multiple clicks
+            send_btn.config(text="Sending...", state='disabled')
+            win.update_idletasks()
+            
+            print(f"DEBUG: Attempting SMTP Login for {user_mail}...")
+            
+            try:
+                from email.message import EmailMessage
+                msg = EmailMessage()
+                msg.set_content(f"Your ODM Quotation System OTP is: {self.current_otp}\n\nUse this to activate your full license for this PC.")
+                msg['Subject'] = "ODM System Verification OTP"
+                msg['From'] = user_mail
+                msg['To'] = user_mail
+
+                context = ssl.create_default_context()
+                # 10 second timeout for SMTP
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
+                    server.login(user_mail, user_pass)
+                    server.send_message(msg)
+                
+                messagebox.showinfo("OTP Sent", f"Verification Code has been sent to {user_mail}\nPlease check your inbox/spam.", parent=win)
+                
+                # Show OTP Fields
+                otp_label.pack(pady=(25, 5))
+                otp_ent.pack(pady=5)
+                send_btn.config(text="Resend Code", state='normal', bootstyle="secondary-outline")
+                verify_btn.pack(pady=20)
+                
+            except Exception as e:
+                print(f"SMTP Error: {e}")
+                err_msg = "Could not send email. Possible reasons:\n1. Incorrect Gmail App Password.\n2. No Internet Connection.\n3. Gmail security blocking the request."
+                messagebox.showerror("Delivery Failed", err_msg, parent=win)
+                
+                # Safe Fallback for client reliability
+                messagebox.showinfo("System Note", f"Internet/SMTP Issue detected. For activation, use this temporary code: {self.current_otp}", parent=win)
+                
+                otp_label.pack(pady=(25, 5))
+                otp_ent.pack(pady=5)
+                send_btn.config(text="Retry Send", state='normal', bootstyle="warning-outline")
+                verify_btn.pack(pady=20)
+
+        def verify_otp():
+            if otp_ent.get().strip() == self.current_otp:
+                # SUCCESS: Generate and Save Full License
+                machine_id = self.get_machine_id()
+                SECRET_SALT = "ODM-ONLINE'S_QUOTATION_SYSTEM_2026_SECRET"
+                raw = f"{machine_id}{SECRET_SALT}"
+                hashed = hashlib.sha256(raw.encode()).hexdigest()
+                key = hashed[:16].upper()
+                formatted_key = f"{key[0:4]}-{key[4:8]}-{key[8:12]}-{key[12:16]}"
+                
+                try:
+                    license_dir = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+                    if not os.path.exists(license_dir): os.makedirs(license_dir)
+                    with open(os.path.join(license_dir, "license.key"), "w") as f:
+                        f.write(formatted_key)
+                    
+                    messagebox.showinfo("Success", "Full Access Granted! Welcome to ODM System.", parent=win)
+                    win.destroy()
+                    self.init_database() # Ensure DB is connected
+                    self.check_user_login() # Proceed to main app
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to save license: {e}", parent=win)
+            else:
+                messagebox.showerror("Error", "Invalid OTP! Please check again.", parent=win)
+
+        send_btn = ttk.Button(scrollable_content, text="Send Verification Code", command=send_otp_email, bootstyle="warning")
+        send_btn.pack(pady=20)
+        
+        verify_btn = ttk.Button(scrollable_content, text="Verify & Activate", command=verify_otp, bootstyle="success")
+        # verify_btn will be packed inside send_otp_email after successful send or fallback
 
     def validate_key(self, machine_id, input_key):
+        """Matches the stored key against generated hashed key"""
         SECRET_SALT = "ODM-ONLINE'S_QUOTATION_SYSTEM_2026_SECRET"
         raw_data = f"{machine_id.strip()}{SECRET_SALT}"
         hashed = hashlib.sha256(raw_data.encode()).hexdigest()
@@ -262,177 +704,155 @@ class QuotationApp:
         formatted_generated = f"{generated_key[0:4]}-{generated_key[4:8]}-{generated_key[8:12]}-{generated_key[12:16]}"
         return input_key.strip() == formatted_generated
 
-    def show_license_window(self, machine_id):
-        self.root.withdraw()
-        lic_win = tk.Toplevel(self.root)
-        lic_win.title("Product Activation")
-        lic_win.geometry("800x800")
-        lic_win.config(bg="#2c3e50")
-        
-        def close_app():
-            self.root.destroy()
-            import sys; sys.exit()
-            
-        lic_win.protocol("WM_DELETE_WINDOW", close_app)
-
-        tk.Label(lic_win, text="🚫 Software Not Activated", font=("Segoe UI", 18, "bold"), bg="#2c3e50", fg="#e74c3c").pack(pady=(20,10))
-        tk.Label(lic_win, text="Please send this Machine ID to Admin to get your Key:", bg="#2c3e50", fg="white", font=("Arial", 10)).pack()
-        
-        mid_ent = tk.Entry(lic_win, justify='center', font=("Consolas", 12, "bold"), width=40)
-        mid_ent.pack(pady=10)
-        mid_ent.insert(0, machine_id)
-        mid_ent.config(state='readonly')
-        
-        def copy_id():
-            lic_win.clipboard_clear()
-            lic_win.clipboard_append(machine_id)
-            messagebox.showinfo("Copied", "ID Copied!", parent=lic_win)
-        
-        tk.Button(lic_win, text="Copy ID", command=copy_id, bg="grey", fg="white", font=("Arial", 8)).pack(pady=2)
-
-        tk.Label(lic_win, text="Enter License Key:", bg="#2c3e50", fg="white", font=("Arial", 10, "bold")).pack(pady=(20, 5))
-        key_ent = tk.Entry(lic_win, justify='center', font=("Consolas", 12), width=30)
-        key_ent.pack(pady=5)
-        
-        def activate():
-            user_key = key_ent.get()
-            if self.validate_key(machine_id, user_key):
-                try:
-                    app_data_dir = os.getenv('APPDATA')
-                    license_path = os.path.join(app_data_dir, "ODM_Quotation_Gen", "license.key")
-                    with open(license_path, "w") as f:
-                        f.write(user_key)
-                    messagebox.showinfo("Success", "Software Activated Successfully!", parent=lic_win)
-                    lic_win.destroy()
-                    self.check_user_login()
-                except Exception as e:
-                    messagebox.showerror("Error", f"Could not save license: {e}", parent=lic_win)
-            else:
-                messagebox.showerror("Error", "Invalid License Key!", parent=lic_win)
-
-        tk.Button(lic_win, text="ACTIVATE NOW", command=activate, bg="#27ae60", fg="white", font=("Arial", 12, "bold"), width=20).pack(pady=20)
-
     def check_user_login(self):
+        """Final check before opening Main Application UI"""
+        self.root.deiconify() # Show main app if hidden
         self.cursor.execute("SELECT COUNT(*) FROM users")
         count = self.cursor.fetchone()[0]
         if count == 0:
             self.perform_setup()
         else:
-            self.perform_login(None)
+            self.perform_login()
 
     def perform_setup(self):
         self.root.withdraw()
         setup_win = tk.Toplevel(self.root)
         setup_win.title("First Time Setup - Create Profile")
-        setup_win.state('zoomed') # Full Window
+        setup_win.state('zoomed')
+        
+        # Colors (Matching Login/Splash)
+        BG_COLOR = "#0f172a"
+        CARD_BG = "#1e293b"
+        ACCENT_COLOR = "#38bdf8"
+        TEXT_WHITE = "#f8fafc"
+        TEXT_GREY = "#94a3b8"
+        INPUT_BG = "#334155"
+        BORDER_COLOR = "#475569"
+
+        setup_win.configure(bg=BG_COLOR)
         
         def on_setup_close():
-            # Check if any user exists, if so go back to login, else exit
             try:
                 self.cursor.execute("SELECT COUNT(*) FROM users")
                 if self.cursor.fetchone()[0] > 0:
                     setup_win.destroy()
-                    self.perform_login(None) # Show login
+                    self.perform_login(None)
                 else:
                     sys.exit()
             except:
                 sys.exit()
 
         setup_win.protocol("WM_DELETE_WINDOW", on_setup_close) 
+
+        # Scrollable Container - FIXING WHITE BACKGROUND
+        # Pass bg to make_scrollable so internal frame matches
+        scrollable_content = self.make_scrollable(setup_win, bg=BG_COLOR)
         
-        main_fr = ttk.Frame(setup_win, padding=40)
-        main_fr.pack(fill='both', expand=True, anchor='center')
+        # Ensure the canvas (parent of scrollable_content) also has the bg
+        try:
+            scrollable_content.master.configure(bg=BG_COLOR)
+        except: pass
 
-        # Title
-        tk.Label(main_fr, text="Welcome! Let's Setup Your Profile", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(20, 10))
+        # Main Container - Center it with some padding
+        container = tk.Frame(scrollable_content, bg=BG_COLOR)
+        container.pack(fill='both', expand=True, padx=40, pady=40)
+        
+        # Center Card - Increased Padding/Width ("Khola karo")
+        card = tk.Frame(container, bg=CARD_BG, highlightthickness=1, highlightbackground=BORDER_COLOR, padx=50, pady=50)
+        card.pack(anchor='center', ipadx=20, ipady=20) 
 
-        # Login button if account already exists
+        # 1. HEADER
+        tk.Label(card, text="SETUP YOUR PROFILE", font=("Segoe UI", 28, "bold"), fg=TEXT_WHITE, bg=CARD_BG).pack(pady=(0, 10))
+        tk.Label(card, text="Create a new admin profile to get started", font=("Segoe UI", 11), fg=TEXT_GREY, bg=CARD_BG).pack(pady=(0, 30))
+
+        # 2. TOP ACTIONS (Login / Restore) & SEPARATOR
+        top_act_fr = tk.Frame(card, bg=CARD_BG)
+        top_act_fr.pack(fill='x', pady=(0, 30))
+
         def go_to_login():
+             self.cursor.execute("SELECT COUNT(*) FROM users")
+             if self.cursor.fetchone()[0] == 0:
+                 messagebox.showwarning("No Profile", "No profile found. Please Create Profile first.", parent=setup_win)
+                 return
              setup_win.destroy()
              self.perform_login(None)
 
-        ttk.Button(main_fr, text="Already have an account? Login Here", command=go_to_login, bootstyle="info-outline", width=30).pack(pady=(0, 20))
-
-        # Container for Columns
-        cols_frame = ttk.Frame(main_fr)
-        cols_frame.pack(fill='both', expand=True)
-
-        # Left Column: Basic Info
-        left_col = ttk.Labelframe(cols_frame, text="User Credentials", padding=15, bootstyle="info")
-        left_col.pack(side='left', fill='both', expand=True, padx=10)
-
-        ttk.Label(left_col, text="Full Name:").pack(anchor='w')
-        name_ent = ttk.Entry(left_col, width=40); name_ent.pack(pady=5, fill='x')
+        ttk.Button(top_act_fr, text="Already have an account? Login", command=go_to_login, bootstyle="link").pack(side='right')
         
-        ttk.Label(left_col, text="Set Username:").pack(anchor='w')
-        user_ent = ttk.Entry(left_col, width=40); user_ent.pack(pady=5, fill='x')
-        
-        ttk.Label(left_col, text="Set Password:").pack(anchor='w')
-        pass_ent = ttk.Entry(left_col, width=40, show="*"); pass_ent.pack(pady=5, fill='x')
+        ttk.Button(top_act_fr, text="♻️ Restore from Backup", 
+                   command=lambda: self.restore_database(parent_win=setup_win), 
+                   bootstyle="info-outline").pack(side='left')
 
-        # Profile Picture Section
-        ttk.Label(left_col, text="Profile Picture:").pack(anchor='w', pady=(15, 5))
-        
-        pic_frame = ttk.Frame(left_col)
-        pic_frame.pack(fill='x', pady=5)
-        
-        self.preview_img_lbl = ttk.Label(pic_frame, text="No Image", background="#ecf0f1", anchor="center", font=("Arial", 9))
-        self.preview_img_lbl.pack(side='left', padx=(0,10))
-        self.preview_img_lbl.config(width=15) # Fixed placeholder width
+        ttk.Separator(card, orient='horizontal').pack(fill='x', pady=(0, 30))
 
+        # 3. COLUMNS
+        cols_fr = tk.Frame(card, bg=CARD_BG)
+        cols_fr.pack(fill='both', expand=True)
+
+        # Re-usable Entry Helper with MORE PADDING
+        def create_styled_entry(parent, label_text, show_char=None):
+            tk.Label(parent, text=label_text, font=("Segoe UI", 10, "bold"), fg=ACCENT_COLOR, bg=CARD_BG).pack(anchor='w', pady=(15, 5))
+            e_frame = tk.Frame(parent, bg=INPUT_BG, highlightthickness=1, highlightbackground=BORDER_COLOR)
+            e_frame.pack(fill='x', ipady=6) # Increased interactive height
+            ent = tk.Entry(e_frame, bg=INPUT_BG, fg="white", font=("Segoe UI", 11), relief='flat', insertbackground='white')
+            if show_char: ent.config(show=show_char)
+            ent.pack(fill='x', padx=10, pady=5)
+            return ent
+
+        # --- LEFT COLUMN: CREDENTIALS ---
+        left_col = tk.Frame(cols_fr, bg=CARD_BG)
+        left_col.pack(side='left', fill='both', expand=True, padx=(0, 30))
+
+        tk.Label(left_col, text="User Credentials", font=("Segoe UI", 14, "bold", "underline"), fg=TEXT_WHITE, bg=CARD_BG).pack(anchor='w', pady=(0, 15))
+
+        name_ent = create_styled_entry(left_col, "FULL NAME")
+        user_ent = create_styled_entry(left_col, "USERNAME")
+        pass_ent = create_styled_entry(left_col, "PASSWORD", "*")
+
+        # Profile Pic
+        tk.Label(left_col, text="PROFILE PICTURE", font=("Segoe UI", 10, "bold"), fg=ACCENT_COLOR, bg=CARD_BG).pack(anchor='w', pady=(20, 10))
+        pic_row = tk.Frame(left_col, bg=CARD_BG)
+        pic_row.pack(fill='x')
+        
+        self.preview_img_lbl = tk.Label(pic_row, text="No Image", bg=INPUT_BG, fg=TEXT_GREY, width=12, height=6)
+        self.preview_img_lbl.pack(side='left', padx=(0, 15))
+        
         self.setup_pic_path = None
         
         def choose_pic():
             p = filedialog.askopenfilename(parent=setup_win, filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
             if p:
                 self.setup_pic_path = p
-                btn_pic.config(text="Change Image", bootstyle="warning-outline")
-                
-                # Show Preview
                 try:
                     load = Image.open(p)
-                    load = load.resize((80, 80), Image.Resampling.LANCZOS)
+                    load.thumbnail((80, 80), Image.Resampling.LANCZOS)
                     self.setup_preview_photo = ImageTk.PhotoImage(load)
-                    self.preview_img_lbl.config(image=self.setup_preview_photo, text="")
-                    btn_set_confirm.pack(side='left', padx=5) # Show Set Button
-                    btn_set_confirm.config(state='normal', text="Set Image")
+                    self.preview_img_lbl.config(image=self.setup_preview_photo, text="", width=80, height=80) 
+                    self.preview_img_lbl.config(image=self.setup_preview_photo)
                 except Exception as e:
                     messagebox.showerror("Error", f"Invalid Image: {e}")
 
-        def confirm_pic():
-             messagebox.showinfo("Image Set", "Profile Image Set Successfully!", parent=setup_win)
-             # Visual feedback only since save happens at verify
-             btn_set_confirm.config(state='disabled', text="✅ Set")
+        btn_pic = tk.Button(pic_row, text="Browse Image...", command=choose_pic, bg=INPUT_BG, fg=TEXT_WHITE, relief='flat', font=("Segoe UI", 9))
+        btn_pic.pack(side='left', fill='x', expand=True, ipady=8)
 
-        btn_pic = ttk.Button(pic_frame, text="Choose Image...", command=choose_pic, bootstyle="secondary-outline")
-        btn_pic.pack(side='left', fill='x', expand=True)
 
-        btn_set_confirm = ttk.Button(pic_frame, text="Set Image", command=confirm_pic, bootstyle="success")
-        # Note: We don't pack it immediately, only after selection to show 'Set' option
+        # --- RIGHT COLUMN: SECURITY ---
+        right_col = tk.Frame(cols_fr, bg=CARD_BG)
+        right_col.pack(side='right', fill='both', expand=True, padx=(30, 0))
 
-        # Right Column: Security Questions
-        right_col = ttk.Labelframe(cols_frame, text="Security Recovery (Create 3 Questions)", padding=15, bootstyle="warning")
-        right_col.pack(side='right', fill='both', expand=True, padx=10)
+        tk.Label(right_col, text="Security Recovery", font=("Segoe UI", 14, "bold", "underline"), fg=TEXT_WHITE, bg=CARD_BG).pack(anchor='w', pady=(0, 15))
+        tk.Label(right_col, text="Required for password reset.", font=("Segoe UI", 9), fg="#fbbf24", bg=CARD_BG).pack(anchor='w', pady=(0, 5))
 
-        # Q1
-        ttk.Label(right_col, text="Question 1:").pack(anchor='w')
-        q1_ent = ttk.Entry(right_col, width=40); q1_ent.pack(fill='x', pady=(0, 2))
-        ttk.Label(right_col, text="Answer 1:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
-        a1_ent = ttk.Entry(right_col, width=40); a1_ent.pack(fill='x', pady=(0, 10))
-
-        # Q2
-        ttk.Label(right_col, text="Question 2:").pack(anchor='w')
-        q2_ent = ttk.Entry(right_col, width=40); q2_ent.pack(fill='x', pady=(0, 2))
-        ttk.Label(right_col, text="Answer 2:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
-        a2_ent = ttk.Entry(right_col, width=40); a2_ent.pack(fill='x', pady=(0, 10))
-
-        # Q3
-        ttk.Label(right_col, text="Question 3:").pack(anchor='w')
-        q3_ent = ttk.Entry(right_col, width=40); q3_ent.pack(fill='x', pady=(0, 2))
-        ttk.Label(right_col, text="Answer 3:", font=("Arial", 8, "italic"), foreground="grey").pack(anchor='w')
-        a3_ent = ttk.Entry(right_col, width=40); a3_ent.pack(fill='x', pady=(0, 10))
-
+        q1_ent = create_styled_entry(right_col, "Question 1")
+        a1_ent = create_styled_entry(right_col, "Answer 1")
         
+        q2_ent = create_styled_entry(right_col, "Question 2")
+        a2_ent = create_styled_entry(right_col, "Answer 2")
+
+        q3_ent = create_styled_entry(right_col, "Question 3")
+        a3_ent = create_styled_entry(right_col, "Answer 3")
+
+        # 4. SUBMIT BUTTON
         def save_user():
             # Strip extra spaces
             full_name = name_ent.get().strip()
@@ -461,250 +881,19 @@ class QuotationApp:
                 self.perform_login(None) 
             except Exception as e:
                 messagebox.showerror("Error", f"Error saving profile: {e}", parent=setup_win)
-                # If username exists error, handle it gracefully
                 if "UNIQUE constraint" in str(e):
                     messagebox.showerror("Error", "Username already taken.", parent=setup_win)
 
-        # Action Buttons
-        btn_frame = ttk.Frame(main_fr)
-        btn_frame.pack(pady=40)
+        tk.Frame(card, height=40, bg=CARD_BG).pack() # Larger Spacer
 
-        ttk.Button(btn_frame, text="SAVE & START SYSTEM", command=save_user, style="success.TButton", width=30).pack(pady=5, ipady=5)
-        # ttk.Button(btn_frame, text="Already have an account",command=self.perform_login(None),style="info.TButton").pack(pady=5,ipady=5)
-    # def perform_login(self, user_data):
-    #     if user_data:
-    #         self.root.deiconify()
-    #         self.vendor_company_var.set(user_data[3]) 
-    #         self.current_username = user_data[1]
-    #         from dashboard import DashboardPanel
-    #         self.current_dashboard = DashboardPanel(self)
-    #         return 
+        def on_enter(e): btn_save.config(bg="#22c55e")
+        def on_leave(e): btn_save.config(bg="#16a34a") 
 
-    #     self.root.withdraw()
-    #     login_win = tk.Toplevel(self.root)
-    #     login_win.title("Login System")
-    #     login_win.geometry("700x600")
-    #     login_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
-
-    #     tk.Label(login_win, text="SECURE LOGIN", font=("Segoe UI", 18, "bold")).pack(pady=20)
-        
-    #     f = tk.Frame(login_win); f.pack(pady=5)
-    #     tk.Label(f, text="Username:").pack(anchor='w')
-    #     u_ent = ttk.Entry(f, width=30); u_ent.pack(pady=2)
-        
-    #     tk.Label(f, text="Password:").pack(anchor='w', pady=(10,0))
-    #     p_ent = ttk.Entry(f, width=30, show="*"); p_ent.pack(pady=2)
-
-    #     def try_login():
-    #         username = u_ent.get().strip()
-    #         password = p_ent.get().strip()
-    #         self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-    #         row = self.cursor.fetchone()
-    #         if row:
-    #             login_win.destroy()
-    #             self.root.deiconify()
-    #             self.vendor_company_var.set(row[3]) 
-    #             self.current_username = row[1]      
-    #             from dashboard import DashboardPanel
-    #             self.current_dashboard = DashboardPanel(self)
-    #         else:
-    #             messagebox.showerror("Failed", "Wrong Username or Password", parent=login_win)
-    def perform_login(self, user_data=None):
-        if user_data:
-            self.root.deiconify()
-            self.current_username = user_data[1]
-            
-            # Load Profile Pic Path if available
-            try:
-                # user_data is row from users table. schema changed so fetching by name is better, but user_data might be raw tuple
-                # Let's re-fetch safely
-                self.cursor.execute("SELECT profile_pic_path, theme_preference FROM users WHERE username=?", (self.current_username,))
-                urow = self.cursor.fetchone()
-                if urow:
-                    self.current_user_pic_path = urow[0]  # Store for Dashboard
-                    theme = urow[1] if urow[1] else "cosmo"
-                    self.style = ThemeManager.apply_theme(self.root, theme)
-            except Exception as e:
-                print(f"Login data fetch error: {e}")
-                self.current_user_pic_path = None
-
-            from dashboard import DashboardPanel
-            self.current_dashboard = DashboardPanel(self)
-            return 
-
-        self.root.withdraw()
-        login_win = tk.Toplevel(self.root)
-        login_win.title("ODM Secure Login")
-        login_win.state('zoomed') # ZOOMED / MAXIMIZED
-        login_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
-
-        # Center Frame
-        main_fr = ttk.Frame(login_win, padding=30)
-        main_fr.place(relx=0.5, rely=0.5, anchor='center')
-
-        tk.Label(main_fr, text="SECURE LOGIN", font=("Segoe UI", 24, "bold"), fg="#2c3e50").pack(pady=(10, 20))
-        
-        ttk.Label(main_fr, text="Username:").pack(anchor='w')
-        u_ent = ttk.Entry(main_fr, width=40, font=("Segoe UI", 11)); u_ent.pack(pady=5)
-        
-        ttk.Label(main_fr, text="Password:").pack(anchor='w', pady=(10, 0))
-        p_ent = ttk.Entry(main_fr, width=40, show="*", font=("Segoe UI", 11)); p_ent.pack(pady=5)
-
-        # ✅ REMEMBER ME LOGIC
-        self.remember_me_var = tk.BooleanVar(value=False)
-        rem_file = os.path.join(os.getenv('APPDATA'), "odm_remember.json")
-        
-        try:
-            if os.path.exists(rem_file):
-                with open(rem_file, 'r') as f:
-                    saved = json.load(f)
-                    u_ent.insert(0, saved.get('user', ''))
-                    p_ent.insert(0, saved.get('pass', ''))
-                    self.remember_me_var.set(True)
-        except Exception as e:
-            print(f"Error loading remember me data: {e}")
-            # Optionally delete the corrupt file
-            try: os.remove(rem_file)
-            except: pass
-
-        ttk.Checkbutton(main_fr, text="Remember Me", variable=self.remember_me_var, bootstyle="round-toggle").pack(anchor='w', pady=10)
-
-        def try_login():
-            username = u_ent.get().strip()
-            password = p_ent.get().strip()
-            self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-            row = self.cursor.fetchone()
-            if row:
-                try:
-                    if self.remember_me_var.get():
-                        with open(rem_file, 'w') as f: json.dump({'user': username, 'pass': password}, f)
-                    elif os.path.exists(rem_file):
-                        os.remove(rem_file)
-                except Exception as e:
-                    print(f"Error saving remember me data: {e}")
-
-                login_win.destroy()
-                self.perform_login(row)
-            else:
-                messagebox.showerror("Failed", "Invalid Credentials", parent=login_win)
-
-        ttk.Button(main_fr, text="LOGIN", command=try_login, bootstyle="success", width=25).pack(pady=20)
-
-        # ✅ RECOVERY Links
-        ttk.Separator(main_fr, orient='horizontal').pack(fill='x', pady=15)
-        
-        ttk.Button(main_fr, text="Forgot Password?", command=lambda: self.forgot_password_flow(u_ent.get().strip(), login_win), 
-                   bootstyle="link").pack(pady=5)
-
-        ttk.Label(main_fr, text="Don't have a profile?", font=("Arial", 9), foreground="grey").pack(pady=(15, 0))
-        ttk.Button(main_fr, text="Setup New Profile", command=lambda: [login_win.destroy(), self.perform_setup()], 
-                   bootstyle="secondary-outline", width=25).pack(pady=5)
-
-    def forgot_password_flow(self, prefill_user, parent_win):
-        rec_win = tk.Toplevel(parent_win)
-        rec_win.title("Password Recovery")
-        rec_win.geometry("600x600")
-        
-        tk.Label(rec_win, text="Password Recovery", font=("Segoe UI", 16, "bold")).pack(pady=15)
-        
-        f = ttk.Frame(rec_win, padding=20)
-        f.pack(fill='both', expand=True)
-
-        tk.Label(f, text="Enter Username to fetch questions:").pack(anchor='w')
-        u_e = ttk.Entry(f, width=40)
-        u_e.pack(pady=5)
-        if prefill_user: u_e.insert(0, prefill_user)
-
-        # Container for Qs
-        q_frame = ttk.Frame(f)
-        q_frame.pack(fill='both', expand=True, pady=10)
-
-        self.questions_loaded = False
-        self.real_answers = []
-
-        def load_questions():
-            user = u_e.get().strip()
-            if not user: return
-            
-            # Fetch q1, a1...
-            try:
-                self.cursor.execute("SELECT q1, a1, q2, a2, q3, a3 FROM users WHERE username=?", (user,))
-                row = self.cursor.fetchone()
-                
-                for w in q_frame.winfo_children(): w.destroy()
-                
-                if row and row[0]: # Has Qs
-                    self.questions_loaded = True
-                    self.real_answers = [row[1], row[3], row[5]] # a1, a2, a3
-                    
-                    tk.Label(q_frame, text="Please answer the following:", font=("bold")).pack(pady=5)
-                    
-                    self.ans_entries = []
-                    
-                    # Q1
-                    tk.Label(q_frame, text=f"Q1: {row[0]}").pack(anchor='w', pady=(5,0))
-                    e1 = ttk.Entry(q_frame, width=40); e1.pack(pady=2)
-                    self.ans_entries.append(e1)
-                    
-                    # Q2
-                    tk.Label(q_frame, text=f"Q2: {row[2]}").pack(anchor='w', pady=(5,0))
-                    e2 = ttk.Entry(q_frame, width=40); e2.pack(pady=2)
-                    self.ans_entries.append(e2)
-                    
-                    # Q3
-                    q3_text = row[4] if row[4] else "Question 3 (Not Set)"
-                    tk.Label(q_frame, text=f"Q3: {q3_text}").pack(anchor='w', pady=(5,0))
-                    e3 = ttk.Entry(q_frame, width=40); e3.pack(pady=2)
-                    self.ans_entries.append(e3)
-                    
-                else:
-                    tk.Label(q_frame, text="User not found or no questions set.", fg="red").pack(pady=20)
-                    self.questions_loaded = False
-            except Exception as e:
-                print(e)
-
-        ttk.Button(f, text="Load Questions", command=load_questions, style="info.TButton").pack(pady=5)
-        
-        # Auto-load if username keyin
-        if prefill_user:
-            load_questions()
-        
-        def verify_answers():
-            if not self.questions_loaded: return
-            
-            username = u_e.get().strip()
-            score = 0
-            for i, ent in enumerate(self.ans_entries):
-                user_ans = ent.get().strip().lower()
-                real_ans = self.real_answers[i].strip().lower() if self.real_answers[i] else ""
-                
-                if user_ans and user_ans == real_ans:
-                    score += 1
-            
-            if score >= 2:
-                # Success
-                new_pass = simpledialog.askstring("Reset Password", "Authentication Verified!\nEnter New Password:", parent=rec_win, show='*')
-                if new_pass:
-                    self.cursor.execute("UPDATE users SET password=? WHERE username=?", (new_pass, username))
-                    self.conn.commit()
-                    messagebox.showinfo("Success", "Password Changed! Please Login.", parent=rec_win)
-                    rec_win.destroy()
-            else:
-                messagebox.showerror("Failed", f"Verification Failed.\nCorrect Answers: {score}/3\nNeed at least 2 correct.", parent=rec_win)
-                # Show Re-create profile option
-                btn_reset_profile.pack(pady=10)
-
-        verify_btn = ttk.Button(f, text="Verify & Reset", command=verify_answers, style="success.TButton")
-        verify_btn.pack(pady=20)
-
-        # Fallback Option (Initially Hidden)
-        def fallback_reset():
-            if messagebox.askyesno("Setup New Profile", "This will overwrite the database keys for this user (if local DB). Continue?"):
-                rec_win.destroy()
-                parent_win.destroy()
-                self.perform_setup()
-
-        btn_reset_profile = ttk.Button(f, text="Forgot Answers? Setup New Profile", command=fallback_reset, style="danger.Outline.TButton")
+        btn_save = tk.Button(card, text="SAVE & START SYSTEM", font=("Segoe UI", 12, "bold"), bg="#16a34a", fg="white", 
+                             relief='flat', cursor="hand2", command=save_user)
+        btn_save.pack(fill='x', pady=20, ipady=10)
+        btn_save.bind("<Enter>", on_enter)
+        btn_save.bind("<Leave>", on_leave)
 
     # =========================================================================
     # DATABASE METHODS
@@ -772,7 +961,7 @@ class QuotationApp:
             return
 
         self.db_name = "QuotationManager_Final.db"
-        self.conn = sqlite3.connect(self.db_name)
+        self.conn = sqlite3.connect(self.db_name, timeout=30, check_same_thread=False)
         self.cursor = self.conn.cursor()
 
         # --- 1. BASIC TABLES SETUP ---
@@ -812,6 +1001,7 @@ class QuotationApp:
             
             try:
                 self.cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl}_ref_no ON {tbl} (ref_no)")
+                self.cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_client ON {tbl} (client_name)")
             except:
                 pass
 
@@ -827,16 +1017,28 @@ class QuotationApp:
         add_column_if_missing("users", "profile_pic_path", "TEXT")
 
         self.conn.commit()
+        
+        # Trigger Auto-Backup Check
+        self.check_auto_backup()
+        
         print("✅ Database Connected & Schema Synchronized (Errors Fixed)")
-    def backup_database(self):
+    def backup_database(self, auto=False):
         """Creates a Universal ZIP Backup including Database and All Assets (Logos, Pics)"""
         try:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".zip",
-                filetypes=[("Quotation Universal Backup", "*.zip")],
-                initialfile=f"Full_Backup_{timestamp}.zip"
-            )
+            filename = f"Full_Backup_{timestamp}.zip"
+            
+            if auto:
+                backup_dir = r"C:\Quotation_Backups"
+                if not os.path.exists(backup_dir):
+                    os.makedirs(backup_dir)
+                file_path = os.path.join(backup_dir, filename)
+            else:
+                file_path = filedialog.asksaveasfilename(
+                    defaultextension=".zip",
+                    filetypes=[("Quotation Universal Backup", "*.zip")],
+                    initialfile=filename
+                )
             
             if not file_path: return
             
@@ -851,27 +1053,72 @@ class QuotationApp:
                 # 2. Assets gather karein (Logos, Profile Pics etc)
                 # Hum un files ko track kareinge jo external hain
                 assets_dir = os.path.join(tmpdir, "assets")
-                os.makedirs(assets_dir)
+                if not os.path.exists(assets_dir):
+                    os.makedirs(assets_dir)
                 
                 # Sab paths ka map banayenge taake restore pe paths fix ho sakein
-                # Note: Filhal hum poora database file hi backup kar rahay hain.
-                # Agar user ne pictures computer ke kisi folder mein rakhi hain, to logic ye hai
-                # ke hum unhe bhi bundle karein.
-                
-                # ZIP mein convert karein
                 with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    # Database add karein
+                    # 1. Database add karein
                     zipf.write(db_copy, arcname=self.db_name)
                     
-                    # Optional: Yahan assets folder add ho sakta hai agar hum images auto-copy feature implement karein.
-                    # Filhal, DB restore hi priority hai, lekin images handle karna robust banata hai.
+                    # 2. Assets folder add karein (agar maujood ho)
+                    # Is mein profile pics, logos waghaira ho saktay hain
+                    # (Assuming assets logic is implemented elsewhere or handled here)
+                    if os.path.exists("assets"):
+                        for root, dirs, files in os.walk("assets"):
+                            for file in files:
+                                zipf.write(os.path.join(root, file))
                 
-                messagebox.showinfo("Success", f"Universal Backup Created!\n\nLocation: {file_path}")
+                if auto:
+                    print(f"✅ Auto-Backup Completed: {file_path}")
+                else:
+                    messagebox.showinfo("Success", f"Universal Backup Created!\n\nLocation: {file_path}")
                 
         except Exception as e:
-            messagebox.showerror("Backup Error", f"Failed: {e}")
+            if not auto:
+                messagebox.showerror("Backup Error", f"Failed: {e}")
+            else:
+                print(f"❌ Auto-Backup Failed: {e}")
 
-    def restore_database(self):
+    def check_auto_backup(self):
+        """Check if 15 days have passed since last backup."""
+        try:
+            # Create settings table if not exists (in case init_database missed it)
+            self.cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+            self.conn.commit()
+
+            today_str = datetime.date.today().isoformat()
+            
+            self.cursor.execute("SELECT value FROM settings WHERE key='last_backup_date'")
+            row = self.cursor.fetchone()
+            
+            should_backup = False
+            
+            if not row:
+                # First run ever or new feature: set last backup to today so we don't spam immediately, 
+                # OR run immediately? User said "after 15 days". 
+                # Let's run it immediately to be safe, then schedule next for 15 days later.
+                # Actually, if row is missing, let's treat it as "never backed up" -> Backup Now.
+                should_backup = True
+            else:
+                last_date_str = row[0]
+                try:
+                    last_date = datetime.date.fromisoformat(last_date_str)
+                    if (datetime.date.today() - last_date).days >= 15:
+                        should_backup = True
+                except ValueError:
+                    should_backup = True
+
+            if should_backup:
+                self.backup_database(auto=True)
+                # Update last backup date
+                self.cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_backup_date', ?)", (today_str,))
+                self.conn.commit()
+                
+        except Exception as e:
+            print(f"⚠️ Auto-Backup Check Failed: {e}")
+
+    def restore_database(self, parent_win=None):
         """Restores from a ZIP Universal Backup"""
         if not messagebox.askyesno("Confirm", "Restoring will OVERWRITE current data. Continue?"):
             return
@@ -886,15 +1133,38 @@ class QuotationApp:
                     messagebox.showerror("Error", "Invalid Backup File: Database not found inside.")
                     return
                 
-                self.conn.close() # Close existing
+                # Close current connection safely
+                try:
+                    self.conn.close()
+                except: pass
                 
-                # Extract Database
-                zipf.extract(self.db_name, path=".")
+                # Extract Everything (Database + Assets)
+                zipf.extractall(".")
                 
-                # Re-init
+                # Re-init Connection & Schema
                 self.init_database()
-                
-            messagebox.showinfo("Success", "Restoration Complete!\nAll quotations, users and data recovered.")
+
+            # --- SMART TRANSITION ---
+            # Check if any user exists in the restored DB
+            self.cursor.execute("SELECT COUNT(*) FROM users")
+            user_exists = self.cursor.fetchone()[0] > 0
+
+            # Show Success Toast
+            toast = ToastNotification(
+                title="Restoration Successful",
+                message="All data, users, and profile details recovered.",
+                duration=4000,
+                bootstyle="success"
+            )
+            toast.show_toast()
+
+            if user_exists:
+                messagebox.showinfo("Restored", "Backup Restored Successfully! You can now Login.")
+                if parent_win: parent_win.destroy()
+                self.perform_login(None) # Redirect to Login
+            else:
+                messagebox.showwarning("Restored", "Data restored, but no user profile found. Please create one.")
+                if not parent_win: self.perform_setup() # Open setup if not already there
             
         except Exception as e:
             messagebox.showerror("Restore Error", f"Failed: {e}")
@@ -910,19 +1180,34 @@ class QuotationApp:
         except Exception:
             return
 
-        # FIX: Sirf tab Auto-save karein agar ID majood ho (Yani file pehle se saved ho)
-        # Agar nayi file hai, to hum wait karenge ke user pehli dafa khud 'Save' ka button dabaye.
-        # Is se duplicates banna band ho jayenge.
-        if self.current_db_id is not None and self.client_name_var.get().strip():
+        # FIX: Sirf tab Auto-save karein agar:
+        # 1. ID majood ho (yani file pehle se saved ho)
+        # 2. Client ka naam ho
+        # 3. Items list khali na ho
+        if (self.current_db_id is not None and 
+            self.client_name_var.get().strip() and 
+            len(self.items_data) > 0):
              self.save_to_database(silent=True)
             
-        # Loop ko dobara schedule karein
-        # Store the after ID so we can cancel it if needed (optional but good practice)
-        self.auto_save_timer = self.root.after(5000, self.auto_save_loop)
+        # Loop ko dobara schedule karein (Slightly safer check)
+        try:
+            if self.root.winfo_exists():
+                self.auto_save_timer = self.root.after(5000, self.auto_save_loop)
+        except: pass
         
-    def save_to_database(self, silent=False):
-        if not self.client_name_var.get().strip():
+    def save_to_database(self, silent=False, pre_fetched_data=None):
+        # 1. Validation: Client Name required (Accessing StringVars is usually thread-thread safe in Tkinter if it was created in main thread, but safer to check winfo_exists)
+        try:
+            client_name = self.client_name_var.get().strip()
+        except: return 
+        
+        if not client_name:
             if not silent: messagebox.showwarning("Error", "Client Name is required!", parent=self.root)
+            return
+
+        # 2. Validation: Kam se kam ek item hona chahiye taake blank records na banen
+        if not self.items_data:
+            if not silent: messagebox.showwarning("Empty Quotation", "Please add at least one item before saving (Total Revenue must be greater than 0).", parent=self.root)
             return
 
         # Data Pack karna
@@ -940,20 +1225,35 @@ class QuotationApp:
             "financial": {"curr": self.currency_var.get(), "gst": self.gst_rate_var.get()},
             "items": self.items_data,
             "colors": self.row_colors,
-            "extra": [(k, v.get()) for k, v in self.extra_fields],
-            "terms": self.terms_txt.get("1.0", "end-1c")
+            "extra": pre_fetched_data['extra'] if pre_fetched_data else [(k, v.get()) for k, v in self.extra_fields],
+            "terms": pre_fetched_data['terms'] if pre_fetched_data else (self.terms_txt.get("1.0", "end-1c") if hasattr(self, 'terms_txt') else "")
         }
         json_str = json.dumps(data_packet)
 
-        # Total Calculation
+        # Total Calculation (Directly from items_data for accuracy)
         try:
-            import re
-            txt_total = self.total_lbl.cget("text")
-            match = re.search(r"[\d,]+\.?\d*", txt_total)
-            gt = float(match.group().replace(',', '')) if match else 0.0
-        except: gt = 0.0
+            gt = sum(float(i.get('total', 0)) for i in self.items_data)
+        except: 
+            gt = 0.0
 
         try:
+            # --- TRIAL LIMIT CHECK ---
+            license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+            if not os.path.exists(license_path):
+                # We are in trial mode
+                current_quotes = self.get_trial_count()
+                if not self.current_db_id: # Only check on NEW SAVE
+                    if current_quotes >= 2:
+                        if messagebox.askyesno("Trial Expired", "Limit Reached (2/2). App will now close.\nWould you like to BACKUP your data first?"):
+                            self.backup_database()
+                        self.root.destroy(); sys.exit()
+                        return
+                    new_count = self.increment_trial()
+                    print(f"Trial Usage: {new_count}/2")
+                    
+                    if new_count >= 2:
+                        messagebox.showwarning("Final Quote", "This was your last trial quotation. Software will now expire.\nPlease back up your data.")
+
             # --- 1. UPDATE LOGIC (Record pehle se load hai) ---
             if self.current_db_id:
                 self.cursor.execute("""
@@ -985,9 +1285,15 @@ class QuotationApp:
             self.conn.commit()
             
             if not silent:
+                # Show Remaining Trial Info in Toast if applicable
+                msg = f"Quotation #{self.quotation_no_var.get()} has been saved."
+                if not os.path.exists(license_path):
+                    used = self.get_trial_count()
+                    msg += f"\n(Trial Usage: {used}/2)"
+
                 toast = ToastNotification(
                     title="Saved Successfully",
-                    message=f"Quotation #{self.quotation_no_var.get()} has been saved.",
+                    message=msg,
                     duration=3000,
                     bootstyle="success",
                     position=(50, 50, 'ne')
@@ -1063,15 +1369,13 @@ class QuotationApp:
         # --- 1. WINDOW SETUP ---
         win = tk.Toplevel(self.root)
         win.title("Quotation History & Manager")
-        win.geometry("1150x650")
+        win.geometry("1250x700")
         win.transient(self.root)
         win.grab_set()
 
         # --- 2. TREEVIEW SETUP ---
-
-        # --- 2. TREEVIEW SETUP ---
         cols = ("chk", "ID", "Ref No", "Client", "Date", "Amount")
-        tree = ttk.Treeview(win, columns=cols, show='headings', selectmode='browse')
+        tree = ttk.Treeview(win, columns=cols, show='headings', selectmode='browse', height=18)
         
         tree.heading("chk", text="✔");       tree.column("chk", width=40, anchor="center")
         tree.heading("ID", text="ID");       tree.column("ID", width=60, anchor="center")
@@ -1129,6 +1433,17 @@ class QuotationApp:
                 if row:
                     win.destroy()
  
+                    # CRITICAL: Rebuild UI if it was destroyed by dashboard
+                    if not hasattr(self, 'tree') or not self.tree.winfo_exists():
+                        # Clear any dashboard remnants
+                        for widget in self.root.winfo_children():
+                            try: widget.destroy()
+                            except: pass
+                        
+                        # Rebuild the main quotation UI
+                        self._build_scrollable_gui()
+                        self.root.update_idletasks()
+
                     if self.current_dashboard:
                         try:
                             # Koshish karein destroy karne ki
@@ -1203,17 +1518,21 @@ class QuotationApp:
                     parent_win.grab_release() 
                     parent_win.destroy()      
                     
-                    import importlib
-                    mod = importlib.import_module(module_name)
-                    app_class = getattr(mod, class_name)
+                    def start_new_module():
+                        import importlib
+                        mod = importlib.import_module(module_name)
+                        app_class = getattr(mod, class_name)
+                        
+                        new_win = tk.Toplevel(self.root)
+                        app_instance = app_class(new_win, from_quotation_data=row[0])
+                        new_win.state('zoomed')
+                        new_win.lift()
+                        new_win.focus_force()
+                        new_win.attributes('-topmost', True)
+                        new_win.after(1000, lambda: new_win.attributes('-topmost', False))
                     
-                    new_win = tk.Toplevel(self.root)
-                    app_instance = app_class(new_win, from_quotation_data=row[0])
-                    new_win.state('zoomed')
-                    new_win.lift()
-                    new_win.focus_force()
-                    new_win.attributes('-topmost', True)
-                    new_win.after(1000, lambda: new_win.attributes('-topmost', False))
+                    # Run after 200ms to let history window clear completely
+                    self.root.after(200, start_new_module)
             except Exception as e:
                 messagebox.showerror("Error", str(e))
         
@@ -1282,8 +1601,48 @@ class QuotationApp:
 
         # refresh_list()
     def go_to_dashboard(self):
-    
-        from dashboard import DashboardPanel   # <--- Ye line add karein
+        # 1. Stop the auto-save loop immediately
+        if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
+            try: self.root.after_cancel(self.auto_save_timer)
+            except: pass
+            self.auto_save_timer = None
+        
+        # 2. Background Save (Securely pre-fetch data before widgets vanish)
+        if hasattr(self, 'client_name_var') and self.client_name_var.get().strip():
+            try:
+                # Check if it's already a saved record or has items
+                if self.items_data:
+                    import threading
+                    # Pre-fetch ONLY the data that depends on widgets (like Text boxes)
+                    from_ui = {
+                        'terms': self.terms_txt.get("1.0", "end-1c") if hasattr(self, 'terms_txt') else "",
+                        'extra': [(k, v.get()) for k, v in self.extra_fields] if hasattr(self, 'extra_fields') else []
+                    }
+                    
+                    # Use a small helper to pass this data to save_to_database
+                    def bg_save_worker():
+                        try: self.save_to_database(silent=True, pre_fetched_data=from_ui)
+                        except: pass
+                    
+                    threading.Thread(target=bg_save_worker, daemon=True).start()
+            except: pass
+
+        # 3. If this is a Toplevel window (DC, Invoice, etc.), just close it!
+        try:
+            if isinstance(self.root, tk.Toplevel):
+                if hasattr(self, 'original_root') and self.original_root:
+                    self.original_root.deiconify()
+                self.root.destroy()
+                return
+        except: pass
+
+        # 4. If it's the main root window, clear UI and show Dashboard
+        for widget in self.root.winfo_children():
+            try: widget.destroy()
+            except: pass
+            
+        self.root.update_idletasks()
+        from dashboard import DashboardPanel
         self.current_dashboard = DashboardPanel(self)
 
     def restore_data(self, json_str):
@@ -1330,23 +1689,25 @@ class QuotationApp:
             raw_colors = data.get("colors", {})
             self.row_colors = {int(k): v for k, v in raw_colors.items()}
             
-            # 5. Restore Terms
-            self.terms_txt.delete("1.0", "end")
-            self.terms_txt.insert("1.0", data.get("terms", ""))
+            # 5. Restore Terms (with safety check)
+            if hasattr(self, 'terms_txt') and self.terms_txt.winfo_exists():
+                self.terms_txt.delete("1.0", "end")
+                self.terms_txt.insert("1.0", data.get("terms", ""))
             
-            # 6. Restore Extra Fields
-            for w in self.extra_cont.winfo_children(): w.destroy()
-            self.extra_fields = []
-            for name, val in data.get("extra", []):
-                fr = ttk.Frame(self.extra_cont); fr.pack(fill='x', pady=1)
-                ttk.Label(fr, text=f"{name}:").pack(side='left', padx=5)
-                var = tk.StringVar(value=val); ttk.Entry(fr, textvariable=var).pack(side='left', fill='x', expand=True)
-                self.extra_fields.append((name, var))
+            # 6. Restore Extra Fields (with safety check)
+            if hasattr(self, 'extra_cont') and self.extra_cont.winfo_exists():
+                for w in self.extra_cont.winfo_children(): w.destroy()
+                self.extra_fields = []
+                for name, val in data.get("extra", []):
+                    fr = ttk.Frame(self.extra_cont); fr.pack(fill='x', pady=1)
+                    ttk.Label(fr, text=f"{name}:").pack(side='left', padx=5)
+                    var = tk.StringVar(value=val); ttk.Entry(fr, textvariable=var).pack(side='left', fill='x', expand=True)
+                    self.extra_fields.append((name, var))
 
             # --- CRITICAL UI UPDATES ---
             self.update_currency_symbol()
-            self.refresh_tree()  # Ye line items ko screen par layegi
-            self.recalc_all()    # Ye total update karegi
+            # self.refresh_tree()  # Redundant, recalc_all calls it
+            self.recalc_all()    # Ye total update karegi aur refresh_tree call karegi
             
             # Ye command screen ko foran repaint karti hai
             self.root.update_idletasks()
@@ -1383,30 +1744,57 @@ class QuotationApp:
         style.configure('Card.TLabelframe', relief='solid', borderwidth=1)
         style.configure('Card.TLabelframe.Label', font=('Segoe UI', 11, 'bold'), foreground="#f39c12")
 
-    def _build_scrollable_gui(self):
-        canvas = tk.Canvas(self.root)
-        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.configure(yscrollcommand=scrollbar.set, yscrollincrement=5)
+    def make_scrollable(self, container, bg=None):
+        """
+        Wraps a container's content into a scrollable canvas.
+        Returns the scrollable_frame where you should pack your widgets.
+        """
+        canvas = tk.Canvas(container, highlightthickness=0, bg=bg)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        
+        # Using tk.Frame to better support custom background colors
+        scrollable_frame = tk.Frame(canvas, bg=bg)
 
-        def _on_mousewheel(event): 
-            try: 
-                speed = int(-1 * (event.delta / 60)) 
-                canvas.yview_scroll(speed, "units")        
-            except: pass
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
 
         window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        def _conf(e):
+
+        def _on_canvas_configure(e):
+            # Sync frame width with canvas width
             canvas.itemconfig(window_id, width=e.width)
-        canvas.bind('<Configure>', _conf)
+            
+        canvas.bind('<Configure>', _on_canvas_configure)
 
         canvas.configure(yscrollcommand=scrollbar.set)
+        
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        self.root.bind_all("<MouseWheel>", _on_mousewheel)
 
-        self._build_content(scrollable_frame)
+        def _on_mousewheel(event):
+            try:
+                # Windows scroll speed calculation
+                speed = int(-1 * (event.delta / 120))
+                canvas.yview_scroll(speed, "units")
+            except: pass
+
+        # Bind mousewheel when mouse enters the widget
+        def _bind_mouse(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_mouse(event):
+            canvas.unbind_all("<MouseWheel>")
+            
+        canvas.bind('<Enter>', _bind_mouse)
+        canvas.bind('<Leave>', _unbind_mouse)
+
+        return scrollable_frame
+
+    def _build_scrollable_gui(self):
+        # Apply the new utility
+        self.scrollable_content_frame = self.make_scrollable(self.root)
+        self._build_content(self.scrollable_content_frame)
 
     def _build_content(self, parent):
         main_container = ttk.Frame(parent) 
@@ -1819,10 +2207,15 @@ class QuotationApp:
         ttk.Checkbutton(f_opt, text="Full Width", variable=self.footer_full_width_var, bootstyle="round-toggle").pack(side='left')
         ttk.Checkbutton(f_opt, text="Pin Bottom", variable=self.footer_pin_to_bottom_var, bootstyle="round-toggle").pack(side='right')
         # BIG SAVE BUTTON (Green Filled)
-        # messagebox.showinfo("Preview", "Disclaimer: Please verify your calculations. If you find any ambiguity, double tap to edit the cell.")  
-        if self.on_preview_click:
-           messagebox.showinfo("Preview", "Disclaimer: Please verify your calculations. If you find any ambiguity, double tap to edit the cell.")                
-        ttk.Button(col3, text="👁 PREVIEW & SAVE", bootstyle="success", command=self.on_preview_click).pack(fill='x', pady=(15, 0), ipady=8)
+        ttk.Button(col3, text="👁 PREVIEW & SAVE", bootstyle="success", command=self.on_preview_click).pack(fill='x', pady=(15, 5), ipady=8)
+        
+        # ✅ SAVE AS OPTIONS
+        save_fr = ttk.Labelframe(col3, text=" Save As ", bootstyle="primary", padding=10)
+        save_fr.pack(fill='x', pady=5)
+        
+        ttk.Button(save_fr, text="📄 Save as PDF", bootstyle="info-outline", command=lambda: self.save_as_format("pdf")).pack(fill='x', pady=2)
+        ttk.Button(save_fr, text="📝 Save as DOCX", bootstyle="info-outline", command=lambda: self.save_as_format("docx")).pack(fill='x', pady=2)
+        ttk.Button(save_fr, text="📊 Save as XLSX", bootstyle="info-outline", command=lambda: self.save_as_format("xlsx")).pack(fill='x', pady=2)
     # =========================================================================
     # HEADER MANAGEMENT
     # =========================================================================
@@ -1929,27 +2322,17 @@ class QuotationApp:
         mgr.transient(self.root)
         mgr.grab_set()
 
-        ttk.Label(mgr, text="Manage Header Layout & Colors", font=('Segoe UI', 14, 'bold')).pack(pady=10)
-        ttk.Label(mgr, text="Customize existing rows or add new Split (2-col) / Full (1-col) rows.", font=('Segoe UI', 10)).pack(pady=(0,10))
+        # Use make_scrollable
+        scrollable_content = self.make_scrollable(mgr)
 
-        list_fr = ttk.Frame(mgr)
-        list_fr.pack(fill='both', expand=True, padx=20, pady=5)
-        
-        canvas = tk.Canvas(list_fr)
-        sb = ttk.Scrollbar(list_fr, orient="vertical", command=canvas.yview)
-        t_frame = ttk.Frame(canvas)
-        
-        t_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0,0), window=t_frame, anchor="nw")
-        canvas.configure(yscrollcommand=sb.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        
-        self.mgr_canvas = canvas
+        ttk.Label(scrollable_content, text="Manage Header Layout & Colors", font=('Segoe UI', 14, 'bold')).pack(pady=10)
+        ttk.Label(scrollable_content, text="Customize existing rows or add new Split (2-col) / Full (1-col) rows.", font=('Segoe UI', 10)).pack(pady=(0,10))
+
+        t_frame = ttk.Frame(scrollable_content)
+        t_frame.pack(fill='both', expand=True, padx=20, pady=5)
         self.mgr_frame = t_frame
         
-        btn_fr = ttk.Frame(mgr)
+        btn_fr = ttk.Frame(scrollable_content)
         btn_fr.pack(fill='x', padx=10, pady=10)
         ttk.Button(btn_fr, text="+ Add Split Row (Vendor | Client)", command=lambda: self.add_header_row("split")).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="+ Add Full Row (Full Width)", command=lambda: self.add_header_row("full")).pack(side='left', padx=5)
@@ -2046,10 +2429,13 @@ class QuotationApp:
         self.col_win.transient(self.root)
         self.col_win.grab_set()
 
+        # Use make_scrollable Utility
+        scrollable_content = self.make_scrollable(self.col_win)
+
         # 2. UI Elements
-        ttk.Label(self.col_win, text="Drag & Drop Rows to Reorder", font=('Segoe UI', 14, 'bold')).pack(pady=10)
+        ttk.Label(scrollable_content, text="Drag & Drop Rows to Reorder", font=('Segoe UI', 14, 'bold')).pack(pady=10)
         
-        main_fr = ttk.Frame(self.col_win, padding=10)
+        main_fr = ttk.Frame(scrollable_content, padding=10)
         main_fr.pack(fill='both', expand=True)
         
         cols = ("label", "width", "type", "print", "id")
@@ -2087,7 +2473,7 @@ class QuotationApp:
             tv.insert("", "end", iid=str(idx), values=(c['label'], c['width'], c['type'], prt, c['id']))
         
         # --- ACTION BUTTONS ---
-        btn_fr = ttk.Frame(self.col_win, padding=10)
+        btn_fr = ttk.Frame(scrollable_content, padding=10)
         btn_fr.pack(fill='x')
         
         # Buttons ko functions ke saath sahi se link kiya hai
@@ -2167,30 +2553,33 @@ class QuotationApp:
         d.title("Edit Column" if col_data else "Add Column")
         d.geometry("350x480")
         d.transient(parent); d.grab_set()
-        
+
         is_new = col_data is None
         # Default 'printable' to True
         new_data = col_data.copy() if col_data else {'id': f"c_{len(self.columns_config)}_{int(datetime.datetime.now().timestamp())}", 'label': 'New Col', 'width': 100, 'type': 'text', 'printable': True}
         if 'printable' not in new_data: new_data['printable'] = True
+        
+        # Use make_scrollable Utility
+        scrollable_content = self.make_scrollable(d)
 
-        ttk.Label(d, text="Header Label:").pack(pady=(10,0))
+        ttk.Label(scrollable_content, text="Header Label:").pack(pady=(10,0))
         lbl_var = tk.StringVar(value=new_data['label'])
-        ttk.Entry(d, textvariable=lbl_var).pack()
+        ttk.Entry(scrollable_content, textvariable=lbl_var).pack()
         
-        ttk.Label(d, text="Width (px):").pack(pady=(5,0))
+        ttk.Label(scrollable_content, text="Width (px):").pack(pady=(5,0))
         w_var = tk.IntVar(value=new_data['width'])
-        ttk.Entry(d, textvariable=w_var).pack()
+        ttk.Entry(scrollable_content, textvariable=w_var).pack()
         
-        ttk.Label(d, text="Column Type:").pack(pady=(5,0))
+        ttk.Label(scrollable_content, text="Column Type:").pack(pady=(5,0))
         t_var = tk.StringVar(value=new_data['type'])
-        cb = ttk.Combobox(d, textvariable=t_var, values=["text", "number", "calc", "global_pct", "auto"], state="readonly")
+        cb = ttk.Combobox(scrollable_content, textvariable=t_var, values=["text", "number", "calc", "global_pct", "auto"], state="readonly")
         cb.pack()
         
         # Printable Checkbox
         print_var = tk.BooleanVar(value=new_data['printable'])
-        ttk.Checkbutton(d, text="Include in PDF/Word Output?", variable=print_var).pack(pady=10)
+        ttk.Checkbutton(scrollable_content, text="Include in PDF/Word Output?", variable=print_var).pack(pady=10)
         
-        ttk.Label(d, text="Note: 'calc' = Row Total\n'global_pct' = % of Amount", justify="center").pack(pady=10, padx=5)
+        ttk.Label(scrollable_content, text="Note: 'calc' = Row Total\n'global_pct' = % of Amount", justify="center").pack(pady=10, padx=5)
 
         def _save():
             new_data['label'] = lbl_var.get()
@@ -2205,7 +2594,7 @@ class QuotationApp:
             callback_fn()
             d.destroy()
             
-        ttk.Button(d, text="Save / Add Column", command=_save, style="Action.TButton").pack(pady=20, fill='x', padx=50)
+        ttk.Button(scrollable_content, text="Save / Add Column", command=_save, style="Action.TButton").pack(pady=20, fill='x', padx=50)
 
     # quotation.py mein is function ko is se replace karein
 # Yeh lines class ke andar (indented) honi chahiye
@@ -2251,22 +2640,25 @@ class QuotationApp:
         edit_win.transient(self.root)
         edit_win.grab_set()
         
-        tk.Label(edit_win, text=f"Edit {real_col_id.title()}:", font=("Segoe UI", 10, "bold")).pack(pady=10)
+        # Use make_scrollable Utility
+        scrollable_content = self.make_scrollable(edit_win)
+        
+        tk.Label(scrollable_content, text=f"Edit {real_col_id.title()}:", font=("Segoe UI", 10, "bold")).pack(pady=10)
         
         # Input Widget (Text area for description, Entry for others)
         if real_col_id in ['desc', 'description']:
-            txt_input = tk.Text(edit_win, height=8, width=40, font=("Segoe UI", 10))
+            txt_input = tk.Text(scrollable_content, height=8, width=40, font=("Segoe UI", 10))
             txt_input.pack(padx=20, pady=5)
             txt_input.insert("1.0", str(current_val))
             input_widget = txt_input
             def get_val(): return txt_input.get("1.0", "end-1c")
         else:
-            ent_input = ttk.Entry(edit_win, font=("Segoe UI", 10))
+            ent_input = ttk.Entry(scrollable_content, font=("Segoe UI", 10))
             ent_input.pack(padx=20, pady=5, fill='x')
             ent_input.insert(0, str(current_val))
             input_widget = ent_input
             def get_val(): return ent_input.get()
-            
+        
         input_widget.focus_set()
 
         def save_and_close(event=None):
@@ -2297,7 +2689,7 @@ class QuotationApp:
             edit_win.destroy()
 
         # Buttons
-        btn_fr = ttk.Frame(edit_win)
+        btn_fr = ttk.Frame(scrollable_content)
         btn_fr.pack(pady=20)
         ttk.Button(btn_fr, text="✅ Confirm & Save", bootstyle="success", command=save_and_close).pack(side='left', padx=10)
         ttk.Button(btn_fr, text="❌ Cancel", bootstyle="secondary", command=edit_win.destroy).pack(side='left', padx=10)
@@ -2723,6 +3115,10 @@ class QuotationApp:
             self.footer_logo_lbl.config(text="(No Logo)", foreground="grey")
 
     def refresh_tree(self):
+        # Safety check: Don't try to refresh if tree was destroyed
+        if not hasattr(self, 'tree') or not self.tree.winfo_exists():
+            return
+        
         for i in self.tree.get_children(): self.tree.delete(i)
         tr = self.gst_rate_var.get() / 100.0
         
@@ -3041,55 +3437,113 @@ class QuotationApp:
     # DOCUMENT GENERATION
     # =========================================================================
     def on_preview_click(self):
-        # 1. Temporary File Create karein
+        # 1. Show "Please Wait" to avoid "Not Responding"
+        wait = tk.Toplevel(self.root)
+        wait.title("Please Wait")
+        wait.geometry("400x150")
+        wait.resizable(False, False)
+        wait.transient(self.root)
+        # ✅ FIX: Don't use grab_set - it blocks the UI
+        # wait.grab_set()
+        
+        # Center the wait window
+        root_x = self.root.winfo_x()
+        root_y = self.root.winfo_y()
+        root_w = self.root.winfo_width()
+        root_h = self.root.winfo_height()
+        wait.geometry(f"+{root_x + (root_w//2) - 200}+{root_y + (root_h//2) - 75}")
+
+        tk.Label(wait, text="🔄 Generating PDF Preview...", font=("Segoe UI", 14, "bold"), fg="#2980b9").pack(expand=True, pady=(20, 0))
+        tk.Label(wait, text="Please wait while document is being prepared...", font=("Segoe UI", 9), fg="grey").pack(expand=True, pady=(0, 20))
+        
+        # Pre-fetch data for thread safety (Tkinter widgets should only be accessed via main thread)
+        # _get_tagged_text is slow and UI-bound, must run here.
+        tagged_terms = self._get_tagged_text()
+        
+        self.root.update()
+
+        # 2. Preparation & Generation
+        def worker(terms):
+            try:
+                # Temporary File Create
+                fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+                os.close(fd) 
+                
+                # PDF Generate
+                self._generate_pdf(tmp_path, terms)
+                
+                # Successful: Open and Confirm
+                self.root.after(0, lambda: self._show_preview_confirm(tmp_path, wait))
+            except Exception as e:
+                err_msg = str(e)
+                self.root.after(0, lambda m=err_msg: [wait.destroy(), messagebox.showerror("Preview Error", f"Could not generate preview.\nDetails: {m}")])
+
+        import threading
+        threading.Thread(target=worker, args=(tagged_terms,), daemon=True).start()
+
+    def _show_preview_confirm(self, tmp_path, wait_win):
+        # 3. Open PDF
         try:
-            # Secure temp file banayi
-            import tempfile
-            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
-            os.close(fd) # File handle release karein taake ReportLab likh sake
-            
-            # 2. PDF Generate karein
-            self._generate_pdf(tmp_path)
-            
-            # 3. PDF Open karein (Windows vs Others)
             if os.path.exists(tmp_path):
-                if os.name == 'nt':  # Agar Windows hai
+                if os.name == 'nt':  # Windows
                     os.startfile(tmp_path)
-                else:  # Agar Mac/Linux hai
+                else:  # Mac/Linux
                     webbrowser.open("file://" + tmp_path)
             else:
+                wait_win.destroy()
                 messagebox.showerror("Error", "Preview file could not be created.")
                 return
-
         except Exception as e:
-            messagebox.showerror("Preview Error", f"Could not generate preview.\nDetails: {str(e)}")
+            wait_win.destroy()
+            messagebox.showerror("Error", f"Could not open PDF: {e}")
             return
-            
-        # 4. Confirmation Popup (Ab ye PDF khulne ke baad ayega)
+
+        wait_win.destroy()
+
+        # 4. Confirmation Popup
         top = tk.Toplevel(self.root)
         top.title("Confirm Preview")
-        top.geometry("400x300")
+        top.geometry("450x350")
         top.transient(self.root)
-        top.grab_set()
+        top.lift()
+        top.focus_force()
+        # ✅ FIX: Don't use grab_set - it blocks the UI
+        # top.grab_set()
         
-        ttk.Label(top, text="Check the opened PDF Layout.", font=('Segoe UI', 12, 'bold')).pack(pady=10)
-        ttk.Label(top, text="If it looks good, choose a format to save:", foreground="grey").pack(pady=(0,10))
+        # Center confirm window
+        root_x = self.root.winfo_x()
+        root_y = self.root.winfo_y()
+        root_w = self.root.winfo_width()
+        root_h = self.root.winfo_height()
+        top.geometry(f"+{root_x + (root_w//2) - 225}+{root_y + (root_h//2) - 175}")
+
+        ttk.Label(top, text="Check the opened PDF Layout.", font=('Segoe UI', 12, 'bold')).pack(pady=15)
+        ttk.Label(top, text="If it looks good, choose a format to save:", foreground="grey").pack(pady=(0,15))
         
         btn_fr = ttk.Frame(top)
-        btn_fr.pack(fill='both', expand=True, padx=20, pady=10)
+        btn_fr.pack(fill='both', expand=True, padx=30, pady=10)
         
-        ttk.Button(btn_fr, text="✅ Approve & Save as PDF", command=lambda: self._finish_save(top, "pdf")).pack(fill='x', pady=5)
-        ttk.Button(btn_fr, text="📄 Approve & Save as DOCX", command=lambda: self._finish_save(top, "docx")).pack(fill='x', pady=5)
-        ttk.Button(btn_fr, text="📊 Approve & Save as Excel", command=lambda: self._finish_save(top, "xlsx")).pack(fill='x', pady=5)
+        ttk.Button(btn_fr, text="✅ Approve & Save as PDF", command=lambda: self._finish_save(top, "pdf"), bootstyle="success").pack(fill='x', pady=7, ipady=5)
+        ttk.Button(btn_fr, text="📄 Approve & Save as DOCX", command=lambda: self._finish_save(top, "docx"), bootstyle="info").pack(fill='x', pady=7, ipady=5)
+        ttk.Button(btn_fr, text="📊 Approve & Save as Excel", command=lambda: self._finish_save(top, "xlsx"), bootstyle="secondary").pack(fill='x', pady=7, ipady=5)
         
-        ttk.Separator(btn_fr, orient='horizontal').pack(fill='x', pady=10)
-        ttk.Button(btn_fr, text="❌ Cancel / Edit More", command=top.destroy).pack(fill='x', pady=5)
+        ttk.Separator(btn_fr, orient='horizontal').pack(fill='x', pady=15)
+        ttk.Button(btn_fr, text="❌ Cancel / Edit More", command=top.destroy, bootstyle="danger-outline").pack(fill='x', pady=5)
 
     def _finish_save(self, dialog, fmt):
         dialog.destroy()
         if fmt == "pdf": self.save_pdf()
         elif fmt == "docx": self.save_docx()
         elif fmt == "excel": self.save_excel()
+
+    def save_as_format(self, fmt):
+        """Direct save without preview - called from Save As buttons"""
+        if fmt == "pdf": 
+            self.save_pdf()
+        elif fmt == "docx": 
+            self.save_docx()
+        elif fmt == "xlsx": 
+            self.save_excel()
 
     # --- GENERATORS WITH DYNAMIC HEADER ---
     def _get_scaled_image(self, path, width_inch):
@@ -3109,7 +3563,8 @@ class QuotationApp:
             qr.add_data(data)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
-            tmp = tempfile.mktemp(suffix=".png")
+            fd, tmp = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
             img.save(tmp)
             print(f"QR Code generated at: {tmp}")
             return RLImage(tmp, width=size_inch*inch, height=size_inch*inch)
@@ -3117,7 +3572,7 @@ class QuotationApp:
             print(f"QR Code generation error: {e}")
             return None
 
-    def _generate_pdf(self, path):
+    def _generate_pdf(self, path, pre_fetched_terms=None):
         from reportlab.platypus import KeepTogether # Block protection ke liye
 
         # 1. SETUP
@@ -3151,6 +3606,40 @@ class QuotationApp:
         elements.append(Spacer(1, 15))
         elements.append(Paragraph(f"<b>Vendor's Code: {self.vendor_code_var.get()}</b>", ParagraphStyle('C', parent=norm_style, alignment=TA_CENTER, fontSize=12)))
         elements.append(Spacer(1, 15))
+
+        # 2b. DYNAMIC HEADER TABLE (Client Info, etc.)
+        header_data = []
+        for row_cfg in self.header_rows:
+            l_val = row_cfg['l_val'].get().strip() if 'l_val' in row_cfg else ""
+            r_val = row_cfg['r_val'].get().strip() if 'r_val' in row_cfg else ""
+            l_lbl = row_cfg['l_label_var'].get().strip() if 'l_label_var' in row_cfg else row_cfg.get('l_label', "").strip()
+            r_lbl = row_cfg['r_label_var'].get().strip() if 'r_label_var' in row_cfg else row_cfg.get('r_label', "").strip()
+            
+            show_l = (l_lbl != "" if 'l_label_var' in row_cfg else l_val != "")
+            show_r = (r_lbl != "" if 'r_label_var' in row_cfg else r_val != "")
+
+            if not show_l and not show_r: continue
+            
+            if row_cfg.get('type') == 'full':
+                 header_data.append([
+                     Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style),
+                     ""
+                 ])
+            else:
+                 p_l = Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style) if show_l else ""
+                 p_r = Paragraph(f"<b>{r_lbl}</b> {r_val}", norm_style) if show_r else ""
+                 header_data.append([p_l, p_r])
+        
+        if header_data:
+            t_dyn_header = Table(header_data, colWidths=[CW*0.5, CW*0.5])
+            t_dyn_header.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                ('TOPPADDING', (0,0), (-1,-1), 5),
+            ]))
+            elements.append(t_dyn_header)
+            elements.append(Spacer(1, 15))
 
         # 3. DYNAMIC TABLE
         print_cols = [c for c in self.columns_config if c.get('printable', True)]
@@ -3240,7 +3729,8 @@ class QuotationApp:
         # 4. TERMS & CONDITIONS (Restored)
         elements.append(Paragraph("<b>Terms & Conditions:</b>", ParagraphStyle('BT', parent=norm_style, fontSize=10)))
         # Use a spacer or keep it close
-        elements.append(Paragraph(self._get_tagged_text(), ParagraphStyle('BC', parent=norm_style, fontSize=9)))
+        terms_content = pre_fetched_terms if pre_fetched_terms is not None else self._get_tagged_text()
+        elements.append(Paragraph(terms_content, ParagraphStyle('BC', parent=norm_style, fontSize=9)))
         elements.append(Spacer(1, 20))
 
         # 5. SIGNATURES BLOCK
@@ -3250,16 +3740,12 @@ class QuotationApp:
         # We want "Prepared By" (Left), "System Note" (Center), "Approved By" (Right)
         # All on generally the same horizontal level, bottom-aligned.
         
-        sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=10, alignment=TA_LEFT)
-        sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=10, alignment=TA_RIGHT)
-        sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=8, alignment=TA_CENTER, textColor=colors.red)
+        sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=8, alignment=TA_LEFT)
+        sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=8, alignment=TA_RIGHT)
+        sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=7, alignment=TA_CENTER, textColor=colors.red)
         
         # Structure:
-        # Row 1: ___________       (Note)        ___________
-        # Row 2: Prepared By   (System Gen...)   Approved By
-        
-        # Ideally, we can do it in one cell with <br/> or separate rows.
-        # Let's use separate cells for cleanliness.
+        # Row 1: Prepared By: ___________       (Note)        Approved By: ___________
         
         is_quotation = self.__class__.__name__ == "QuotationApp"
         
@@ -3268,15 +3754,15 @@ class QuotationApp:
             note_text = "Note: This is a system generated document so no need to sign."
             
             sig_data = [[
-                Paragraph("_________________<br/><b>Prepared By</b>", sig_style_left),
-                Paragraph(f"<br/>{note_text}", sig_style_center), 
-                Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
+                Paragraph("<b>Prepared By:</b> _________________", sig_style_left),
+                Paragraph(note_text, sig_style_center), 
+                Paragraph("<b>Approved By:</b> _________________", sig_style_right)
             ]]
         else:
             sig_data = [[
-                Paragraph("_________________<br/><b>Prepared By</b>", sig_style_left),
+                Paragraph("<b>Prepared By:</b> _________________", sig_style_left),
                 "", 
-                Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
+                Paragraph("<b>Approved By:</b> _________________", sig_style_right)
             ]]
         
         # Adjust Column Widths to ensure "System Note" fits in center without squashing signatures
@@ -3639,8 +4125,8 @@ class QuotationApp:
 
 def start_app():
     root = tb.Window(themename="superhero")    
-    root.withdraw() # Sab se pehle main app ko chhupa dein
-
+    root.withdraw() 
+    
     # --- FULL SCREEN SPLASH WINDOW ---
     splash = tk.Toplevel(root)
     splash.overrideredirect(True) 
@@ -3648,58 +4134,134 @@ def start_app():
     sw = root.winfo_screenwidth()
     sh = root.winfo_screenheight()
     splash.geometry(f"{sw}x{sh}+0+0") 
-    splash.configure(bg="#121212") 
-    splash.attributes('-topmost', True) # Screen ke upar rakhne ke liye
+    
+    # Professional Color Palette 
+    BG_COLOR = "#0f172a"     # Main Background (Darker)
+    CARD_BG = "#1e293b"      # Card Background (Lighter)
+    ACCENT_COLOR = "#38bdf8" # Sky Blue
+    TEXT_WHITE = "#f8fafc"   
+    TEXT_GREY = "#94a3b8"  
+    BORDER_COLOR = "#334155" # Subtle Border
 
-    # --- UI ELEMENTS SETUP ---
+    splash.configure(bg=BG_COLOR) 
+    splash.attributes('-topmost', True)
+    splash.attributes('-alpha', 0.0) # Start Invisible for Fade In
+    
+    # --- MAIN CARD CONTAINER ---
+    # Fixed size card to look cleaner
+    CARD_W, CARD_H = 650, 520
+    
+    # We use a Canvas for the card to get a border/shadow effect if needed, 
+    # but a simple Frame with highlightthickness works for modern flat look.
+    card_frame = tk.Frame(splash, bg=CARD_BG, highlightbackground=BORDER_COLOR, highlightthickness=1)
+    
+    # Initial Position (Slightly Lower for Slide-Up Animation)
+    start_y = (sh - CARD_H) // 2 + 50
+    final_y = (sh - CARD_H) // 2
+    center_x = (sw - CARD_W) // 2
+    
+    card_frame.place(x=center_x, y=start_y, width=CARD_W, height=CARD_H)
+
+    # 0. Logo (Top of Card)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = ["splash_logo.png", "logo.png", "logo.jpg", "logo.jpeg", "logo.ico"]
+    
+    found_logo = None
+    for c in candidates:
+        p = os.path.join(script_dir, c)
+        if os.path.exists(p):
+            found_logo = p
+            break
+            
+    if found_logo:
+        try:
+            pil_img = Image.open(found_logo)
+            pil_img.thumbnail((110, 110), Image.Resampling.LANCZOS)
+            logo_img = ImageTk.PhotoImage(pil_img)
+            
+            logo_lbl = tk.Label(card_frame, image=logo_img, bg=CARD_BG)
+            logo_lbl.image = logo_img 
+            logo_lbl.pack(pady=(40, 10))
+        except: pass
+
     # 1. Main Title
-    title_lbl = tk.Label(splash, text="", font=("Segoe UI", 45, "bold"), fg="#00e676", bg="#121212")
-    title_lbl.place(relx=0.5, rely=0.25, anchor='center')
+    tk.Label(card_frame, text="ODM QIT", font=("Segoe UI", 48, "bold"), fg=ACCENT_COLOR, bg=CARD_BG).pack(pady=(0, 5))
     
-    # 2. Subtitle (ODM-ONLINE)
-    sub_lbl = tk.Label(splash, text="", font=("Segoe UI", 30, "bold"), fg="white", bg="#121212")
-    sub_lbl.place(relx=0.5, rely=0.38, anchor='center')
+    # 2. Subtitle
+    tk.Label(card_frame, text="EMPOWERED BY ODM ONLINE", font=("Segoe UI", 12, "bold", "italic"), fg=TEXT_WHITE, bg=CARD_BG).pack(pady=(0, 20))
 
-    # 3. Slogan (Joining Writing)
-    slogan_lbl = tk.Label(splash, text="", font=("Segoe Script", 18, "italic"), fg="#f1c40f", bg="#121212")
-    slogan_lbl.place(relx=0.5, rely=0.48, anchor='center')
+    # 3. Slogan
+    tk.Label(card_frame, text="Precision in Every Proposal.\nExcellence in Every Quote.", font=("Segoe UI Light", 14), fg=TEXT_GREY, bg=CARD_BG, justify='center').pack(pady=(0, 30))
 
-    # 4. Powered By
-    pow_lbl = tk.Label(splash, text="", font=("Segoe UI", 18, "italic"), fg="#ecf0f1", bg="#121212")
-    pow_lbl.place(relx=0.5, rely=0.58, anchor='center')
+    # 5. Custom Sleek Progress Bar
+    p_frame = tk.Frame(card_frame, bg=CARD_BG, height=4, width=400)
+    p_frame.pack(pady=20)
+    p_frame.pack_propagate(False)
+    
+    # Using a canvas for smooth custom progress
+    p_canvas = tk.Canvas(p_frame, bg="#334155", highlightthickness=0, height=4)
+    p_canvas.pack(fill='both', expand=True)
+    p_bar = p_canvas.create_rectangle(0, 0, 0, 4, fill=ACCENT_COLOR, outline="")
 
-    # 5. Website Link
-    web_lbl = tk.Label(splash, text="", font=("Consolas", 15), fg="#3498db", bg="#121212")
-    web_lbl.place(relx=0.5, rely=0.65, anchor='center')
+    # Status Text
+    status_lbl = tk.Label(card_frame, text="Initializing...", font=("Consolas", 10), fg=TEXT_GREY, bg=CARD_BG)
+    status_lbl.pack(pady=5)
 
-    # --- TYPING ANIMATION LOGIC ---
-    def type_text(label, full_text, next_func=None, index=0):
-        if index <= len(full_text):
-            label.config(text=full_text[:index])
-            splash.after(40, lambda: type_text(label, full_text, next_func, index + 1))
-        elif next_func:
-            splash.after(300, next_func)
+    # Footer (Outside Card)
+    tk.Label(splash, text="© 2026 ODM Online | www.odmonline.com | Contact: +92 314 0692389", font=("Segoe UI", 9), fg="#475569", bg=BG_COLOR).place(relx=0.5, rely=0.96, anchor='center')
 
-    # --- APP LAUNCH SEQUENCE ---
+    # --- ANIMATION LOGIC ---
+    def animate_intro(alpha=0.0, current_y=start_y):
+        # 1. Fade In
+        if alpha < 1.0:
+            alpha += 0.05
+            splash.attributes('-alpha', alpha)
+        
+        # 2. Slide Up
+        if current_y > final_y:
+            current_y -= 2 
+            card_frame.place(y=current_y)
+        
+        if alpha < 1.0 or current_y > final_y:
+            splash.after(20, lambda: animate_intro(alpha, current_y))
+        else:
+            # Animation Done, Start Loading
+            run_progress()
+
+    def run_progress(step=0):
+        if step <= 100:
+            # Update Bar Width
+            w = 400 * (step / 100)
+            p_canvas.coords(p_bar, 0, 0, w, 4)
+            
+            # Update Text
+            if step == 10: status_lbl.config(text="Connecting to Database...")
+            elif step == 40: status_lbl.config(text="Verifying Security Modules...")
+            elif step == 70: status_lbl.config(text="Loading User Interface...")
+            elif step == 90: status_lbl.config(text="Starting Application...")
+            
+            splash.after(30, lambda: run_progress(step + 1))
+        else:
+            launch_actual_app()
+
+    # --- LAUNCH APP ---
     def launch_actual_app():
-        splash.destroy()
-        app_logic = QuotationApp(root)
-        root.deiconify()
-        root.attributes('-topmost', False) 
-        root.state('zoomed') 
-        root.lift()
-        root.focus_force()
+        try:
+            app_logic = QuotationApp(root)
+            splash.destroy()
+            root.deiconify()
+            try: root.state('zoomed') 
+            except: root.geometry("1200x800")
+            root.attributes('-topmost', False) 
+            root.lift()
+            root.focus_force()
+        except Exception as e:
+            splash.destroy()
+            messagebox.showerror("Error", f"Startup Failed: {e}")
+            sys.exit()
 
-    # Animation Chain: Title -> ODM -> Slogan -> Powered By -> Web
-    splash.after(500, lambda: type_text(title_lbl, "ODM Quick Books", 
-      next_func=lambda: type_text(sub_lbl, "ODM-ONLINE", 
-      next_func=lambda: type_text(slogan_lbl, "Precision in Every Proposal, Excellence in Every Quote.", 
-      next_func=lambda: type_text(pow_lbl, "Powered by Orient Marketing", 
-      next_func=lambda: type_text(web_lbl, "www.orientmarketing.com.pk"))))))
-
-    # Total 15-18 seconds ka delay taake typing poori ho sake
-    root.after(16000, launch_actual_app)
-    
+    # Start Animation
+    splash.after(100, animate_intro)
     root.mainloop()
 
 if __name__ == "__main__":

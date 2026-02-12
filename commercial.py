@@ -8,23 +8,15 @@ import os
 import copy
 from PIL import Image, ImageTk  
 # ✅ REPORTLAB IMPORTS
-import reportlab
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, KeepTogether
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.graphics.barcode import qr
-from reportlab.graphics.shapes import Drawing
+# ✅ Lazy Imports (Moved inside functions for speed)
 
 # Parent Class Import
 from quotation import QuotationApp 
 
 class CommercialApp(QuotationApp):
-    def __init__(self, root, from_quotation_data=None):
+    def __init__(self, root, original_root=None, from_quotation_data=None):
         self.root = root
-        self.original_root = root
+        self.original_root = original_root
         self.is_invoice_window = True 
         
         # 1) Invoice Specific Vars
@@ -117,19 +109,47 @@ class CommercialApp(QuotationApp):
         except Exception as e:
             messagebox.showerror("Image Error", f"Failed to load image: {e}", parent=self.root)
 
+    def reset_logo(self, which):
+        """Reset the specified logo."""
+        lbl = None
+        if which == "header":
+            self.header_logo_path = None
+            lbl = self.header_logo_lbl
+        elif which == "header_right":
+            self.header_logo_right_path = None
+            lbl = self.header_logo_right_lbl
+        elif which == "footer":
+            self.footer_logo_path = None
+            lbl = self.footer_logo_lbl
+        
+        if lbl:
+            lbl.config(image='', text="")
+            lbl.image = None
+
     def on_closing(self):
+        """Optimized closing: Instantly restores dashboard and saves in background"""
         try:
-            # ✅ Pehle timer cancel karein taake background error na aaye
+            # 1. Cancel timer
             if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
-                self.root.after_cancel(self.auto_save_timer)
+                try: self.root.after_cancel(self.auto_save_timer)
+                except: pass
             
-            self.save_to_database(silent=True) 
-            
+            # 2. Restore dashboard immediately for fast feel
             if hasattr(self, 'original_root') and self.original_root:
-                self.original_root.deiconify()
-        except: pass
+                try: self.original_root.deiconify()
+                except: pass
+                
+            # 3. Save in background thread
+            if self.client_name_var.get().strip():
+                import threading
+                threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
+                
+            print("✅ Commercial closure initiated")
+        except Exception as e:
+            print(f"Close warning: {e}")
         finally:
-            self.root.destroy()
+            try: self.root.destroy()
+            except: pass
 
     def _init_standard_header_rows(self):
         self.header_rows = []
@@ -173,9 +193,10 @@ class CommercialApp(QuotationApp):
         # --- LEFT LOGO ---
         logo_fr = ttk.Frame(top_grid)
         logo_fr.grid(row=0, column=0, sticky='w')
-        ttk.Button(logo_fr, text="Insert Left Logo", width=15, command=lambda: self.load_logo("header")).pack(anchor='w')
+        ttk.Button(logo_fr, text="Insert Left Logo", width=15, command=lambda: self.load_logo("header")).pack(side='left')
+        ttk.Button(logo_fr, text="Reset", width=6, command=lambda: self.reset_logo("header")).pack(side='left', padx=2)
         self.header_logo_lbl = tk.Label(logo_fr, text="", bg="#f0f0f0") 
-        self.header_logo_lbl.pack(anchor='w', pady=2)
+        self.header_logo_lbl.pack(side='left', pady=2)
 
         # --- CENTER: TITLE ---
         tk.Label(top_grid, text="Commercial Invoice", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
@@ -191,9 +212,10 @@ class CommercialApp(QuotationApp):
         # --- RIGHT LOGO ---
         r_logo_fr = ttk.Frame(top_grid)
         r_logo_fr.grid(row=0, column=3, sticky='e', padx=(20,0))
-        ttk.Button(r_logo_fr, text="Insert Right Logo", width=15, command=lambda: self.load_logo("header_right")).pack(anchor='e')
+        ttk.Button(r_logo_fr, text="Insert Right Logo", width=15, command=lambda: self.load_logo("header_right")).pack(side='left')
+        ttk.Button(r_logo_fr, text="Reset", width=6, command=lambda: self.reset_logo("header_right")).pack(side='left', padx=2)
         self.header_logo_right_lbl = tk.Label(r_logo_fr, text="", bg="#f0f0f0") 
-        self.header_logo_right_lbl.pack(anchor='e', pady=2)
+        self.header_logo_right_lbl.pack(side='left', pady=2)
 
 
         # 3. DETAILS TABLES
@@ -310,11 +332,13 @@ class CommercialApp(QuotationApp):
         
         r_logo = ttk.Frame(ft_box); r_logo.pack(fill='x', pady=2)
         ttk.Button(r_logo, text="+ Footer Logo", width=12, command=lambda: self.load_logo("footer")).pack(side='left')
+        ttk.Button(r_logo, text="Reset", width=6, command=lambda: self.reset_logo("footer")).pack(side='left', padx=2)
         
         self.footer_logo_lbl = tk.Label(r_logo, text="", bg="#f0f0f0")
         self.footer_logo_lbl.pack(side='left', padx=5)
 
         tk.Label(r_logo, text="Size:").pack(side='left', padx=2)
+        self.f_logo_size_var = tk.DoubleVar(value=1.2)
         ttk.Scale(r_logo, variable=self.f_logo_size_var, from_=1.0, to=7.5).pack(side='left', fill='x', expand=True)
         
         r_txt = ttk.Frame(ft_box); r_txt.pack(fill='x', pady=2)
@@ -352,8 +376,16 @@ class CommercialApp(QuotationApp):
     # =========================================================
     #  5. PDF GENERATOR
     # =========================================================
-    def _generate_pdf(self, path):
+    def _generate_pdf(self, path, pre_fetched_terms=None):
         if not os.path.dirname(path): return
+
+        # ✅ CRITICAL: Move heavy imports here for fast startup
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, KeepTogether
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT, TA_JUSTIFY
+        from reportlab.lib.units import inch
+        from reportlab.lib import colors
 
         MARGIN = 20 
 
@@ -381,7 +413,7 @@ class CommercialApp(QuotationApp):
 
         # Increased Margin for Letterhead
         doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=MARGIN, leftMargin=MARGIN, 
-                                topMargin=1.0*inch, bottomMargin=max(1.5*inch, MARGIN + f_h_pts))
+                                topMargin=0.4*inch, bottomMargin=max(1.5*inch, MARGIN + f_h_pts))
         elements = []
         styles = getSampleStyleSheet()
         norm_style = styles['Normal']
@@ -586,7 +618,8 @@ class CommercialApp(QuotationApp):
         
         # Terms & Conditions (RESTORED)
         footer_elements.append(Paragraph("<b>Terms & Conditions:</b>", ParagraphStyle('BT', parent=norm_style, fontSize=10)))
-        footer_elements.append(Paragraph(self._get_tagged_text(), ParagraphStyle('BC', parent=norm_style, fontSize=9)))
+        terms_content = pre_fetched_terms if pre_fetched_terms is not None else self._get_tagged_text()
+        footer_elements.append(Paragraph(terms_content, ParagraphStyle('BC', parent=norm_style, fontSize=9)))
         footer_elements.append(Spacer(1, 40))
 
         # Prepared / Approved By with Red Note
@@ -655,7 +688,7 @@ class CommercialApp(QuotationApp):
             
             # Draw pinned footer if enabled
             if t_foot and self.footer_pin_to_bottom_var.get():
-                t_foot.drawOn(canvas, MARGIN, MARGIN + 0.9*inch)
+                t_foot.drawOn(canvas, MARGIN, 10)
             
             # Draw QR Code on bottom right corner
             if qr_img:
@@ -694,6 +727,8 @@ class CommercialApp(QuotationApp):
 
     def _generate_qr_code(self, data, size_inch=0.6):
         """Generate a QR code image and return a ReportLab Image object."""
+        from reportlab.platypus import Image as RLImage
+        from reportlab.lib.units import inch
         try:
             import qrcode
             qr_gen = qrcode.QRCode(version=1, box_size=10, border=1)
@@ -711,24 +746,71 @@ class CommercialApp(QuotationApp):
             return None
 
     def on_preview_click(self):
-        """PDF Preview logic for Commercial Invoice"""
+        """PDF Preview logic for Commercial Invoice (Multithreaded to avoid hangs)"""
+        import threading
+        
+        # 1. Show Waiting Window
+        wait = tk.Toplevel(self.root)
+        wait.title("Please Wait")
+        wait.geometry("350x120")
+        wait.resizable(False, False)
+        wait.transient(self.root)
+        # ✅ FIX: Don't use grab_set - it blocks the UI
+        # wait.grab_set()
+        
+        # Center the window
         try:
-            import tempfile
-            fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
-            os.close(fd)
-            
-            self._generate_pdf(tmp_path)
-            
-            if os.path.exists(tmp_path):
-                if os.name == 'nt':
-                    os.startfile(tmp_path)
+            root_x = self.root.winfo_x()
+            root_y = self.root.winfo_y()
+            root_w = self.root.winfo_width()
+            root_h = self.root.winfo_height()
+            wait.geometry(f"+{root_x + (root_w//2) - 175}+{root_y + (root_h//2) - 60}")
+        except: pass
+
+        tk.Label(wait, text="🔄 Generating Commercial PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
+        tk.Label(wait, text="This might take a few seconds...", font=("Arial", 9), fg="grey").pack()
+        
+        # Pre-fetch slow data from UI thread (tagged_terms)
+        try:
+            tagged_terms = self._get_tagged_text()
+        except:
+            tagged_terms = ""
+        
+        self.root.update()
+
+        def safe_destroy():
+            try:
+                if wait.winfo_exists(): wait.destroy()
+            except: pass
+
+        def worker():
+            try:
+                import tempfile
+                fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+                os.close(fd)
+                
+                # Pass pre-fetched terms
+                self._generate_pdf(tmp_path, pre_fetched_terms=tagged_terms) 
+                
+                if os.path.exists(tmp_path):
+                    self.root.after(0, lambda: self._show_preview_confirm(tmp_path, wait))
                 else:
-                    import webbrowser
-                    webbrowser.open("file://" + tmp_path)
+                    self.root.after(0, lambda: [safe_destroy(), messagebox.showerror("Error", "Preview file could not be created.")])
+            except Exception as e:
+                err_msg = str(e)
+                self.root.after(0, lambda m=err_msg: [safe_destroy(), messagebox.showerror("Preview Error", m)])
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _open_pdf(self, path):
+        try:
+            if os.name == 'nt':
+                os.startfile(path)
             else:
-                messagebox.showerror("Error", "Preview file could not be created.")
+                import webbrowser
+                webbrowser.open("file://" + path)
         except Exception as e:
-            messagebox.showerror("Preview Error", f"Could not generate preview.\nDetails: {str(e)}")
+            messagebox.showerror("Error", f"Failed to open PDF: {e}")
 
     # --- Save & Utils ---
     def check_license(self): pass 
