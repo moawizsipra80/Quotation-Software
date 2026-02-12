@@ -16,12 +16,15 @@ def find_clients(area, city, category):
     options = webdriver.ChromeOptions()
     options.add_argument("--log-level=3")
     options.add_argument("--start-maximized")
-    # Headless mode (optional: browser piche chalta hai speed barhane ke liye)
-    # options.add_argument("--headless") 
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
     
     print("🚀 Launching Browser for Unlimited Deep Scraping...")
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-    wait = WebDriverWait(driver, 15) 
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    wait = WebDriverWait(driver, 20) 
     
     leads = []
     

@@ -1,14 +1,19 @@
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# Matplotlib moved inside _draw_chart for fast startup
+FigureCanvasTkAgg = None
+plt = None
 import analytics
 import os
 import datetime
-import pyodbc
+try:
+    import pyodbc
+except ImportError:
+    pyodbc = None
 import ui_styles as style  
 import pywinstyles
 from theme_manager import ThemeManager
+import random
 from PIL import Image, ImageTk
 class DashboardPanel:
 
@@ -35,7 +40,8 @@ class DashboardPanel:
         except Exception:
             pass
 
-        self.frame = tk.Frame(self.root, bg=style.BG_MAIN) 
+        # Main Frame setup
+        self.frame = tk.Frame(self.root, bg=style.BG_MAIN)
         self.frame.place(x=0, y=0, relwidth=1, relheight=1)
         
         # Theme selection variable (initialized from current app style/theme)
@@ -47,7 +53,10 @@ class DashboardPanel:
 
         # Data fetching...
         try:
-            self.monthly_data = analytics.get_analytics_data(self.app.conn)
+            # Pass current user for filtered analytics
+            user = getattr(self.app, 'current_username', None)
+            from analytics import get_analytics_data
+            self.monthly_data = get_analytics_data(self.app.conn, user=user)
         except Exception as e:
             print(f"Error fetching monthly data: {e}")
             self.monthly_data = None
@@ -57,23 +66,24 @@ class DashboardPanel:
     def launch_module(self, name):
         """Directly opens the module window without any intermediate selector popups."""
         try:
+            # Withdraw dashboard for focused experience
+            self.app.root.withdraw()
+            
             if name == "invoice":
                 from invoice import InvoiceApp
-           #     self.app.root.withdraw() # Dashboard chupao
                 win = tk.Toplevel(self.app.root)
-                InvoiceApp(win) # Direct Invoice App kholo
+                InvoiceApp(win, original_root=self.app.root) # Pass dashboard root
                 
             elif name == "commercial":
                 from commercial import CommercialApp
-            #    self.app.root.withdraw() # Dashboard chupao
                 win = tk.Toplevel(self.app.root)
-                CommercialApp(win) # Direct Commercial App kholo
+                CommercialApp(win, original_root=self.app.root) # Pass dashboard root
                 
             elif name == "delivery":
                 from delivery_challan import DeliveryChallanApp
-             #   self.app.root.withdraw() # Dashboard chupao
                 win = tk.Toplevel(self.app.root)
-                DeliveryChallanApp(win) # Direct Delivery Challan kholo
+                # DeliveryChallanApp takes original_root in its __init__
+                DeliveryChallanApp(win, original_root=self.app.root) 
 
         except Exception as e:
             messagebox.showerror("Module Error", f"Could not launch {name}: {e}")
@@ -86,28 +96,31 @@ class DashboardPanel:
         sw.geometry("500x550")
         sw.transient(self.root)
         
-        tk.Label(sw, text="Instagram Sniper Bot", font=("Segoe UI", 14, "bold"), fg="#E1306C").pack(pady=10)
+        # Use make_scrollable Utility
+        scrollable_content = self.app.make_scrollable(sw)
+
+        tk.Label(scrollable_content, text="Instagram Sniper Bot", font=("Segoe UI", 14, "bold"), fg="#E1306C").pack(pady=10)
         
         # 1. Target Account
-        tk.Label(sw, text="Target Competitor Username (e.g. outfitters_pk):").pack(anchor='w', padx=20)
-        target_ent = tk.Entry(sw, width=40)
+        tk.Label(scrollable_content, text="Target Competitor Username (e.g. outfitters_pk):").pack(anchor='w', padx=20)
+        target_ent = tk.Entry(scrollable_content, width=40)
         target_ent.pack(pady=5)
         
         # 2. Message Text
-        tk.Label(sw, text="DM Message (Spam se bachne ke liye short rakhein):").pack(anchor='w', padx=20)
-        msg_txt = tk.Text(sw, height=5, width=40, font=("Arial", 10))
+        tk.Label(scrollable_content, text="DM Message (Spam se bachne ke liye short rakhein):").pack(anchor='w', padx=20)
+        msg_txt = tk.Text(scrollable_content, height=5, width=40, font=("Arial", 10))
         msg_txt.pack(pady=5)
         msg_txt.insert("1.0", "Hi! Saw your interest in fashion. Check out our profile! 🔥")
         
         # 3. Image Selection
-        tk.Label(sw, text="Attach Image (Optional):").pack(anchor='w', padx=20)
+        tk.Label(scrollable_content, text="Attach Image (Optional):").pack(anchor='w', padx=20)
         img_path_var = tk.StringVar()
         
         def browse_img():
             p = filedialog.askopenfilename(filetypes=[("Images", "*.jpg;*.png;*.jpeg")])
             if p: img_path_var.set(p)
             
-        btn_fr = tk.Frame(sw)
+        btn_fr = tk.Frame(scrollable_content)
         btn_fr.pack(pady=5)
         tk.Entry(btn_fr, textvariable=img_path_var, width=30).pack(side='left')
         tk.Button(btn_fr, text="Browse", command=browse_img).pack(side='left', padx=5)
@@ -176,8 +189,8 @@ class DashboardPanel:
             except Exception as e:
                 messagebox.showerror("Error", f"Bot Failed: {e}")
 
-        tk.Button(sw, text="🚀 START BOT", bg="#E1306C", fg="white", font=("bold"), 
-                  command=start_process).pack(pady=20, ipadx=20, ipady=5)  
+        tk.Button(scrollable_content, text="🚀 START BOT", bg="#E1306C", fg="white", font=("bold"), 
+                  command=start_process).pack(pady=20, ipadx=20, ipady=5)
 
     def open_edit_profile_dialog(self):
         ed = tk.Toplevel(self.root)
@@ -394,22 +407,39 @@ class DashboardPanel:
         user = getattr(self.app, 'current_username', 'Admin')
         
         try:
-            if user == "admin": 
-                query_count = "SELECT COUNT(*) FROM quotations"
-                query_sum = "SELECT SUM(grand_total) FROM quotations"
-                params = ()
-            else:
-                query_count = "SELECT COUNT(*) FROM quotations WHERE created_by = ?"
-                query_sum = "SELECT SUM(grand_total) FROM quotations WHERE created_by = ?"
-                params = (user,)
-
-            self.app.cursor.execute(query_count, params)
-            total_count = self.app.cursor.fetchone()[0]
+            total_count = 0
+            total_value = 0.0
+            unique_clients = set()
+            tables = ["quotations", "tax_invoices", "commercial_invoices"]
             
-            self.app.cursor.execute(query_sum, params)
-            val = self.app.cursor.fetchone()[0]
-            if val: total_value = val
-        except: pass
+            def safe_float(val):
+                try:
+                    if val is None: return 0.0
+                    if isinstance(val, str):
+                        return float(val.replace(',', '').strip())
+                    return float(val)
+                except: return 0.0
+
+            for tbl in tables:
+                try:
+                    # Optimized Global Calculation: Sum in SQL, not Python
+                    # Use COALESCE to handle NULL gracefully and ensure numeric calculation
+                    self.app.cursor.execute(f"SELECT COUNT(*), SUM(CAST(REPLACE(IFNULL(grand_total, 0), ',', '') AS FLOAT)) FROM {tbl}")
+                    count_val, sum_val = self.app.cursor.fetchone()
+                    total_count += count_val if count_val else 0
+                    total_value += sum_val if sum_val else 0.0
+                    
+                    # Fetching unique clients
+                    self.app.cursor.execute(f"SELECT DISTINCT client_name FROM {tbl} WHERE client_name IS NOT NULL")
+                    for c_row in self.app.cursor.fetchall():
+                        unique_clients.add(c_row[0])
+                except Exception as tbl_err:
+                    print(f"Error summing {tbl}: {tbl_err}")
+            
+            total_clients = len(unique_clients)
+        except Exception as e:
+            print(f"Global Stats Error: {e}")
+            total_clients = 0
 
         # --- LEFT PANEL (SIDEBAR) ---
         left_panel = tk.Frame(self.frame, bg=style.BG_SIDE, width=260)
@@ -515,8 +545,9 @@ class DashboardPanel:
         except:
             curr = "Rs."
 
-        self._draw_kpi_card(cards_fr, "TOTAL QUOTATIONS", str(total_count), "#2980b9", "left")
+        self._draw_kpi_card(cards_fr, "TOTAL DOCUMENTS", str(total_count), "#2980b9", "left")
         self._draw_kpi_card(cards_fr, "TOTAL REVENUE", f"{curr} {total_value:,.0f}", "#27ae60", "left")
+        self._draw_kpi_card(cards_fr, "TOTAL CLIENTS", str(total_clients), "#8e44ad", "left")
 
         # --- 3. QUICK LAUNCH BUTTONS (YE MISSING THA) ---
         q_frame = tk.Frame(right_panel, bg="#f4f6f9")
@@ -544,30 +575,52 @@ class DashboardPanel:
         btn_sum.pack(side='left', padx=5, ipady=5, ipadx=10)
         
 
-        # 4. Charts & Tables Area
+        # 4. Footer (Pack first so it stays at the bottom)
+        footer_frame = tk.Frame(right_panel, bg="#2c3e50", height=40) # Slightly taller for better visibility
+        footer_frame.pack(side='bottom', fill='x') 
+        footer_frame.pack_propagate(False) # Force height
+
+        # Left: Made by
+        tk.Label(footer_frame, text="made by Muhammad Moawiz Sipra", bg="#2c3e50", fg="#bdc3c7", 
+                 font=("Segoe UI", 7, "italic")).pack(side="left", padx=20)
+        
+        # Center: ODM-ONLINE (Using place to center perfectly)
+        tk.Label(footer_frame, text="ODM-ONLINE", bg="#2c3e50", fg="white", 
+                 font=("Segoe UI", 10, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+
+        # 5. Charts, Tables & Insights Area (Pack last with expand=True)
         content_area = tk.Frame(right_panel, bg="#f4f6f9")
-        content_area.pack(fill='both', expand=True, padx=30, pady=(10,5))
+        content_area.pack(fill='both', expand=True, padx=50, pady=(10, 20))
         
-        # Graph (Left)
+        # --- Left: Graph ---
         chart_frame = tk.LabelFrame(content_area, text=" Sales Performance ", bg="white", font=("Segoe UI", 10, "bold"), bd=0, highlightthickness=1)
-        chart_frame.pack(side='left', fill='both', expand=True, padx=(0, 15))
+        chart_frame.pack(side='left', fill='both', expand=True, padx=(0, 10))
         
-        if self.monthly_data is not None and not self.monthly_data.empty:
-            self._draw_chart(chart_frame)
-        else:
-            tk.Label(chart_frame, text="No Data Available for Graph", bg="white", fg="grey").pack(expand=True)
+        # Always call _draw_chart, it handles its own async data fetching and empty states
+        self._draw_chart(chart_frame)
 
-        # Recent Table (Right)
-        table_frame = tk.LabelFrame(content_area, text=" Recent Activity ", bg="white", font=("Segoe UI", 10, "bold"), bd=0, highlightthickness=1)
-        table_frame.pack(side='right', fill='both', expand=True)
+        # --- Right: Multi-Info Panel ---
+        info_panel = tk.Frame(content_area, bg="#f4f6f9")
+        info_panel.pack(side='right', fill='both', expand=True)
+
+        # Recent Activity (Top of info panel)
+        table_frame = tk.LabelFrame(info_panel, text=" Recent Activity ", bg="white", font=("Segoe UI", 10, "bold"), bd=0, highlightthickness=1)
+        table_frame.pack(fill='both', expand=True, pady=(0, 10))
         self._draw_recent_table(table_frame)
-        
-        # Footer
-        footer_frame = tk.Frame(right_panel, bg="#2c3e50", height=35)
-        footer_frame.pack(side='bottom', fill='x', pady=(0, 0)) 
 
-        tk.Label(footer_frame, text="Professional Quotation Generator V5.2", bg="#2c3e50", fg="white", font=("Segoe UI", 9, "bold")).pack(side="left", padx=20, pady=8)
-        tk.Label(footer_frame, text="Made by Muhammad Moawiz Sipra", bg="#2c3e50", fg="#bdc3c7", font=("Segoe UI", 9, "italic")).pack(side="right", padx=20, pady=8)
+        # Informational Insight (Bottom of info panel)
+        insight_frame = tk.LabelFrame(info_panel, text=" Business Insights ", bg="white", font=("Segoe UI", 10, "bold"), bd=0, highlightthickness=1)
+        insight_frame.pack(fill='x', expand=False)
+        
+        tips = [
+            "💡 Pro Tip: Send quotations as PDF for a professional look.",
+            "📊 Stat: Invoices with clear terms get paid 20% faster.",
+            "🚀 Growth: Your revenue this month is looking healthy!",
+            "🛡️ Safety: Always take a weekly backup from Settings.",
+            "💼 CRM: Follow up with clients within 48 hours of quoting."
+        ]
+        tk.Label(insight_frame, text=random.choice(tips), font=("Segoe UI", 9, "italic"), 
+                 bg="white", fg="#2980b9", pady=15, wraplength=250, justify="left").pack()
 
     # --- HELPER UI FUNCTIONS ---
 
@@ -625,63 +678,84 @@ class DashboardPanel:
         tk.Label(content, text=value, font=("Segoe UI", 22, "bold"), fg="#2c3e50", bg="white").pack(anchor='w', pady=(5,0))
 
     def _draw_chart(self, parent):
-        """Dashboard ke liye professional Dark Compact Bar Chart."""
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        from analytics import get_analytics_data
-
-        # 1. Purane graph widgets saaf karein
+        """Dashboard ke liye professional Dark Compact Bar Chart (Async Optimized)."""
+        # 1. Clear previous widgets
         for widget in parent.winfo_children():
             widget.destroy()
 
-        try:
-            df = get_analytics_data(self.app.conn)
-        except:
-            df = None
+        # 2. Loading Placeholder
+        lbl_loading = tk.Label(parent, text="🔄 Preparing Charts...", font=("Arial", 9), bg="#002b36", fg="#93a1a1")
+        lbl_loading.pack(expand=True)
 
-        if df is None or df.empty:
-            tk.Label(parent, text="No Data Available", bg="#002b36", fg="grey").pack(expand=True)
-            return
+        def worker():
+            try:
+                import matplotlib.pyplot as plt
+                from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+                from analytics import get_analytics_data
 
-        try:
-            # ✅ FIGSIZE mazeed choti (Height 2.2) aur Background match
-            # Dashboard ka dark color #002b36 hai
-            fig, ax = plt.subplots(figsize=(5, 2.2), dpi=100)
-            fig.patch.set_facecolor('#002b36') 
-            ax.set_facecolor('#002b36')
+                user = getattr(self.app, 'current_username', None)
+                df = get_analytics_data(self.app.conn, user=user)
 
-            months = df['month']
-            # Neon/Bright colors jo dark background pe uthen
-            colors = {'quotations': '#268bd2', 'tax_invoices': '#859900', 'commercial_invoices': '#b58900'}
+                def update_ui():
+                    try:
+                        if not parent.winfo_exists(): return
+                        lbl_loading.destroy()
+                        
+                        if df is None or df.empty:
+                            tk.Label(parent, text="No Data Available", bg="#002b36", fg="grey").pack(expand=True)
+                            return
 
-            bottom_val = [0] * len(df)
-            for col in ['quotations', 'tax_invoices', 'commercial_invoices']:
-                if col in df.columns:
-                    ax.bar(months, df[col], bottom=bottom_val, label=col.title(), 
-                           color=colors.get(col, '#93a1a1'), width=0.6)
-                    bottom_val = [i + j for i, j in zip(bottom_val, df[col])]
+                        # Plotting
+                        from matplotlib.figure import Figure
+                        fig = Figure(figsize=(4.5, 1.4), dpi=100)
+                        ax = fig.add_subplot(111)
+                        
+                        fig.patch.set_facecolor('#002b36') 
+                        ax.set_facecolor('#002b36')
 
-            # ✅ STYLING: White/Light grey text taake dark pe nazar aaye
-            ax.set_title("Monthly Sales Summary", fontsize=8, color='#93a1a1', fontweight='bold')
-            ax.legend(fontsize=6, loc='upper left', facecolor='#073642', labelcolor='white', framealpha=0.5)
-            
-            # Grids aur Spines set karein
-            ax.tick_params(axis='x', rotation=0, labelsize=7, colors='#93a1a1')
-            ax.tick_params(axis='y', labelsize=7, colors='#93a1a1')
-            for spine in ax.spines.values():
-                spine.set_color('#586e75')
-            
-            # ✅ MARGINS: Space bachane ke liye bilkul tight
-            plt.subplots_adjust(left=0.12, right=0.98, top=0.88, bottom=0.18)
+                        months = df['month']
+                        colors = {
+                            'quotations': '#00d2ff', 
+                            'tax_invoices': '#39ff14', 
+                            'commercial_invoices': '#ff007f',
+                            'delivery_challans': '#f1c40f'
+                        }
 
-            canvas = FigureCanvasTkAgg(fig, master=parent)
-            canvas.draw()
-            
-            # ✅ PACKING: Expand False taake footer ke liye jagah bache
-            canvas.get_tk_widget().pack(fill='x', expand=False, padx=2, pady=0)
+                        bottom_val = [0] * len(df)
+                        # All possible sources as defined in analytics.py
+                        all_sources = ['quotations', 'tax_invoices', 'commercial_invoices', 'delivery_challans']
+                        active_cols = [c for c in all_sources if c in df.columns]
+                        
+                        for col in active_cols:
+                            ax.bar(months, df[col], bottom=bottom_val, label=col.replace('_', ' ').title(), 
+                                    color=colors.get(col, '#93a1a1'), width=0.5, alpha=0.9)
+                            bottom_val = [i + j for i, j in zip(bottom_val, df[col])]
 
-        except Exception as e:
-            tk.Label(parent, text=f"Graph Error", fg="red", bg="#002b36").pack()
+                        ax.set_title("Business Performance (Monthly)", fontsize=8, color='white', fontweight='bold', pad=3)
+                        if not df.empty and active_cols:
+                            ax.legend(fontsize=5, loc='upper right', facecolor='#073642', labelcolor='white', framealpha=0.8)
+                        
+                        ax.tick_params(axis='x', rotation=0, labelsize=7, colors='#93a1a1')
+                        ax.tick_params(axis='y', labelsize=7, colors='#93a1a1')
+                        ax.yaxis.grid(True, linestyle='--', alpha=0.1, color='white')
+                        
+                        for spine in ax.spines.values():
+                            spine.set_color('#586e75')
+                        
+                        plt.subplots_adjust(left=0.12, right=0.96, top=0.82, bottom=0.20)
+
+                        canvas = FigureCanvasTkAgg(fig, master=parent)
+                        canvas.draw()
+                        canvas.get_tk_widget().pack(fill='both', expand=True, padx=5, pady=5)
+                    except Exception as e:
+                        print(f"UI Graph Error: {e}")
+
+                self.app.root.after(0, update_ui)
+            except Exception as e:
+                print(f"Worker Graph Error: {e}")
+
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
      
     def _draw_recent_table(self, parent):
         cols = ("Date", "Client", "Amount")
@@ -742,7 +816,12 @@ class DashboardPanel:
         self.close_dashboard()
 
         try:
-            
+            # 1. Rebuild UI if it was destroyed by go_to_dashboard
+            if not hasattr(self.app, 'tree') or not self.app.tree.winfo_exists():
+                for widget in self.app.root.winfo_children():
+                    widget.destroy() # Clear any leftovers
+                self.app._build_scrollable_gui()
+
             self.app.root.title("Professional Quotation Generator")
             
             # Basic header vars clear
@@ -1032,7 +1111,7 @@ class DashboardPanel:
                 messagebox.showwarning("Error", "Select a record first!", parent=d_win)
                 return
             
-            ref_no = tv.item(sel[0])['values'][0]
+            ref_no = tv.item(sel[0])['values'][1] # Fixed: index was 0 (type), should be 1 (ref)
             try:
                 # Wapis main screen par load karein
                 self.app.cursor.execute("SELECT id, full_data FROM quotations WHERE ref_no=?", (ref_no,))
@@ -1055,6 +1134,8 @@ class DashboardPanel:
     def show_client_month_chart(self, client_name):
         """Show per-document counts for a client for the selected month/year."""
         from datetime import date
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
         # Use current Client Summary filters if available, otherwise default to today.
         try:
@@ -1103,6 +1184,9 @@ class DashboardPanel:
         win.title(f"Monthly Mix - {client_name}")
         win.geometry("600x400")
 
+        # Use make_scrollable Utility
+        scrollable_content = self.app.make_scrollable(win)
+
         fig = Figure(figsize=(5.5, 3.2), dpi=100)
         ax = fig.add_subplot(111)
 
@@ -1131,7 +1215,7 @@ class DashboardPanel:
         sw.title("Settings & Database Maintenance")
         sw.geometry("700x600")
         sw.transient(self.root)
-        sw.resizable(False, False)
+        # sw.resizable(False, False)
 
         # Main container with 2 columns
         container = tk.Frame(sw, bg="#f4f6f9")
@@ -1482,7 +1566,7 @@ class DashboardPanel:
                 messagebox.showerror("Error", str(e))
 
         tk.Button(sw, text="🔍 START DEEP EXTRACTION", bg="#27ae60", fg="white", font=("bold"),
-                  command=run_scraper).pack(pady=10, ipadx=10)  
+                  command=run_scraper).pack(pady=10, ipadx=10)
         
         # --- WHATSAPP POPUP ---
     # --- WHATSAPP POPUP (UPDATED FOR DOCUMENTS) ---
@@ -1504,23 +1588,26 @@ class DashboardPanel:
         sw.geometry("500x550") 
         sw.transient(self.root)
         
-        tk.Label(sw, text="Bulk WhatsApp Sender", font=("Segoe UI", 14, "bold"), fg="#2ecc71").pack(pady=10)
+        # Use make_scrollable Utility
+        scrollable_content = self.app.make_scrollable(sw)
+
+        tk.Label(scrollable_content, text="Bulk WhatsApp Sender", font=("Segoe UI", 14, "bold"), fg="#2ecc71").pack(pady=10)
         
         # 1. Excel List Selection
-        tk.Label(sw, text="Step 1: Select Contact List (Excel)").pack(pady=2)
+        tk.Label(scrollable_content, text="Step 1: Select Contact List (Excel)").pack(pady=2)
         file_path_var = tk.StringVar()
         
         def browse_excel():
             path = filedialog.askopenfilename(filetypes=[("Excel Files", "*.xlsx;*.csv")])
             if path: file_path_var.set(path)
         
-        f_frame = tk.Frame(sw)
+        f_frame = tk.Frame(scrollable_content)
         f_frame.pack()
         tk.Entry(f_frame, textvariable=file_path_var, width=30).pack(side='left')
         tk.Button(f_frame, text="Browse Excel", command=browse_excel).pack(side='left', padx=5)
 
         # 2. Attachment Selection (UPDATED FOR ALL FILES)
-        tk.Label(sw, text="Step 2: Select Attachment (Image / PDF / Doc)").pack(pady=(10, 2))
+        tk.Label(scrollable_content, text="Step 2: Select Attachment (Image / PDF / Doc)").pack(pady=(10, 2))
         img_path_var = tk.StringVar()
         
         def browse_attachment():
@@ -1532,14 +1619,14 @@ class DashboardPanel:
             ])
             if path: img_path_var.set(path)
             
-        i_frame = tk.Frame(sw)
+        i_frame = tk.Frame(scrollable_content)
         i_frame.pack()
         tk.Entry(i_frame, textvariable=img_path_var, width=30).pack(side='left')
         tk.Button(i_frame, text="Browse File", command=browse_attachment).pack(side='left', padx=5)
 
         # 3. Message Text
-        tk.Label(sw, text="Step 3: Type Message").pack(pady=10)
-        msg_text = tk.Text(sw, height=5, width=40, font=("Arial", 10))
+        tk.Label(scrollable_content, text="Step 3: Type Message").pack(pady=10)
+        msg_text = tk.Text(scrollable_content, height=5, width=40, font=("Arial", 10))
         msg_text.pack(pady=5)
         msg_text.insert("1.0", "Asalam-o-Alaikum,\nCheck our services!")
 
@@ -1572,5 +1659,5 @@ class DashboardPanel:
                 except Exception as e:
                     messagebox.showerror("Error", str(e))
 
-        tk.Button(sw, text="🚀 START CAMPAIGN", bg="#27ae60", fg="white", font=("bold"), 
+        tk.Button(scrollable_content, text="🚀 START CAMPAIGN", bg="#27ae60", fg="white", font=("bold"),
                   command=start_bot).pack(pady=15, ipadx=10, ipady=5)
