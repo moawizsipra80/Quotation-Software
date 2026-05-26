@@ -6,6 +6,7 @@ plt = None
 import analytics
 import os
 import datetime
+import sqlite3
 try:
     import pyodbc
 except ImportError:
@@ -62,6 +63,33 @@ class DashboardPanel:
             self.monthly_data = None
 
         self._build_ui()
+
+    def launch_invoice_hub(self):
+        try:
+            self.app.root.withdraw()
+            from invoice_selector import open_invoice_hub
+            open_invoice_hub(self.app.root)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not launch Tax Invoice Manager: {e}")
+            self.app.root.deiconify()
+
+    def launch_commercial_hub(self):
+        try:
+            self.app.root.withdraw()
+            from commercial_selector import open_commercial_hub
+            open_commercial_hub(self.app.root)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not launch Commercial Invoice Manager: {e}")
+            self.app.root.deiconify()
+
+    def launch_dc_hub(self):
+        try:
+            self.app.root.withdraw()
+            from delivery_selector import open_dc_hub
+            open_dc_hub(self.app.root)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not launch Delivery Challan Manager: {e}")
+            self.app.root.deiconify()
 
     def launch_module(self, name):
         """Directly opens the module window without any intermediate selector popups."""
@@ -410,31 +438,29 @@ class DashboardPanel:
             total_count = 0
             total_value = 0.0
             unique_clients = set()
-            tables = ["quotations", "tax_invoices", "commercial_invoices"]
+            db_tables = {
+                "quotations": "QuotationManager_Final.db",
+                "tax_invoices": "TaxInvoice_Manager.db",
+                "commercial_invoices": "CommercialInvoice_Manager.db"
+            }
             
-            def safe_float(val):
+            for tbl, db_file in db_tables.items():
                 try:
-                    if val is None: return 0.0
-                    if isinstance(val, str):
-                        return float(val.replace(',', '').strip())
-                    return float(val)
-                except: return 0.0
-
-            for tbl in tables:
-                try:
-                    # Optimized Global Calculation: Sum in SQL, not Python
-                    # Use COALESCE to handle NULL gracefully and ensure numeric calculation
-                    self.app.cursor.execute(f"SELECT COUNT(*), SUM(CAST(REPLACE(IFNULL(grand_total, 0), ',', '') AS FLOAT)) FROM {tbl}")
-                    count_val, sum_val = self.app.cursor.fetchone()
-                    total_count += count_val if count_val else 0
-                    total_value += sum_val if sum_val else 0.0
-                    
-                    # Fetching unique clients
-                    self.app.cursor.execute(f"SELECT DISTINCT client_name FROM {tbl} WHERE client_name IS NOT NULL")
-                    for c_row in self.app.cursor.fetchall():
-                        unique_clients.add(c_row[0])
+                    conn = sqlite3.connect(db_file)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (tbl,))
+                    if cursor.fetchone():
+                        cursor.execute(f"SELECT COUNT(*), SUM(CAST(REPLACE(IFNULL(grand_total, 0), ',', '') AS FLOAT)) FROM {tbl}")
+                        count_val, sum_val = cursor.fetchone()
+                        total_count += count_val if count_val else 0
+                        total_value += sum_val if sum_val else 0.0
+                        
+                        cursor.execute(f"SELECT DISTINCT client_name FROM {tbl} WHERE client_name IS NOT NULL")
+                        for c_row in cursor.fetchall():
+                            unique_clients.add(c_row[0])
+                    conn.close()
                 except Exception as tbl_err:
-                    print(f"Error summing {tbl}: {tbl_err}")
+                    print(f"Error summing {tbl} inside {db_file}: {tbl_err}")
             
             total_clients = len(unique_clients)
         except Exception as e:
@@ -460,9 +486,9 @@ class DashboardPanel:
         
         tk.Label(left_panel, text="MODULES", bg=style.BG_SIDE, fg="grey", font=("Arial", 8, "bold")).pack(anchor='w', padx=20, pady=(20, 5))
 
-        self._make_menu_btn(left_panel, "🚚 Delivery Challan", lambda: self.launch_module("delivery"))
-        self._make_menu_btn(left_panel, "📄 Tax Invoice", lambda: self.launch_module("invoice"))
-        self._make_menu_btn(left_panel, "🧾 Commercial Inv", lambda: self.launch_module("commercial"))        
+        self._make_menu_btn(left_panel, "🚚 Delivery Challan", lambda: self.launch_dc_hub())
+        self._make_menu_btn(left_panel, "📄 Tax Invoice", lambda: self.launch_invoice_hub())
+        self._make_menu_btn(left_panel, "🧾 Commercial Inv", lambda: self.launch_commercial_hub())        
         
         tk.Label(left_panel, text="SYSTEM", bg=style.BG_SIDE, fg="grey", font=("Arial", 8, "bold")).pack(anchor='w', padx=20, pady=(20, 5))
         self._make_menu_btn(left_panel, "⚙️ Settings / Backup", self.open_settings_window)
@@ -982,40 +1008,47 @@ class DashboardPanel:
                 return stats[c]
 
             try:
-                # Quotations
-                self.app.cursor.execute(
-                    "SELECT client_name, COUNT(*) FROM quotations WHERE date LIKE ? GROUP BY client_name",
-                    (month_key,),
-                )
-                for c_name, cnt in self.app.cursor.fetchall():
-                    if not c_name:
-                        continue
-                    ensure(c_name)["q"] += int(cnt or 0)
-
-                # Tax invoices
+                # 1. Quotations
                 try:
                     self.app.cursor.execute(
+                        "SELECT client_name, COUNT(*) FROM quotations WHERE date LIKE ? GROUP BY client_name",
+                        (month_key,),
+                    )
+                    for c_name, cnt in self.app.cursor.fetchall():
+                        if not c_name: continue
+                        ensure(c_name)["q"] += int(cnt or 0)
+                except Exception as e:
+                    print("Error loading Quotation summary:", e)
+
+                # 2. Tax invoices
+                try:
+                    conn = sqlite3.connect("TaxInvoice_Manager.db")
+                    cur = conn.cursor()
+                    cur.execute(
                         "SELECT client_name, COUNT(*) FROM tax_invoices WHERE date LIKE ? GROUP BY client_name",
                         (month_key,),
                     )
-                    for c_name, cnt in self.app.cursor.fetchall():
-                        if not c_name:
-                            continue
+                    for c_name, cnt in cur.fetchall():
+                        if not c_name: continue
                         ensure(c_name)["tax"] += int(cnt or 0)
-                except Exception:
-                    pass
+                    conn.close()
+                except Exception as e:
+                    print("Error loading Tax Invoice summary:", e)
 
-                # Commercial invoices
+                # 3. Commercial invoices
                 try:
-                    self.app.cursor.execute(
+                    conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                    cur = conn.cursor()
+                    cur.execute(
                         "SELECT client_name, COUNT(*) FROM commercial_invoices WHERE date LIKE ? GROUP BY client_name",
                         (month_key,),
                     )
-                    for c_name, cnt in self.app.cursor.fetchall():
-                        if not c_name:
-                            continue
+                    for c_name, cnt in cur.fetchall():
+                        if not c_name: continue
                         ensure(c_name)["comm"] += int(cnt or 0)
-                except Exception:
+                    conn.close()
+                except Exception as e:
+                    print("Error loading Commercial Invoice summary:", e)
                     pass
 
             except Exception as e:
@@ -1081,19 +1114,51 @@ class DashboardPanel:
         tv.pack(fill='both', expand=True, padx=20, pady=5)
         
         try:
-            # UNION ALL Query to fetch everything
-            query = """
-                SELECT 'Quotation', ref_no, date, grand_total FROM quotations WHERE client_name=?
-                UNION ALL
-                SELECT 'Tax Invoice', ref_no, date, grand_total FROM tax_invoices WHERE client_name=?
-                UNION ALL
-                SELECT 'Comm Invoice', ref_no, date, grand_total FROM commercial_invoices WHERE client_name=?
-                UNION ALL
-                SELECT 'Deliv Challan', ref_no, date, grand_total FROM delivery_challans WHERE client_name=?
-                ORDER BY date DESC
-            """
-            self.app.cursor.execute(query, (client_name, client_name, client_name, client_name))
-            rows = self.app.cursor.fetchall()
+            rows = []
+            # 1. Quotations
+            try:
+                self.app.cursor.execute("SELECT 'Quotation', ref_no, date, grand_total FROM quotations WHERE client_name=?", (client_name,))
+                rows.extend(self.app.cursor.fetchall())
+            except Exception as e:
+                print("Error loading Quotations:", e)
+                
+            # 2. Tax Invoices
+            try:
+                conn = sqlite3.connect("TaxInvoice_Manager.db")
+                cur = conn.cursor()
+                cur.execute("SELECT 'Tax Invoice', ref_no, date, grand_total FROM tax_invoices WHERE client_name=?", (client_name,))
+                rows.extend(cur.fetchall())
+                conn.close()
+            except Exception as e:
+                print("Error loading Tax Invoices:", e)
+
+            # 3. Commercial Invoices
+            try:
+                conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                cur = conn.cursor()
+                cur.execute("SELECT 'Comm Invoice', ref_no, date, grand_total FROM commercial_invoices WHERE client_name=?", (client_name,))
+                rows.extend(cur.fetchall())
+                conn.close()
+            except Exception as e:
+                print("Error loading Commercial Invoices:", e)
+
+            # 4. Delivery Challans
+            try:
+                conn = sqlite3.connect("DeliveryChallan_Manager.db")
+                cur = conn.cursor()
+                cur.execute("SELECT 'Deliv Challan', ref_no, date, grand_total FROM delivery_challans WHERE client_name=?", (client_name,))
+                rows.extend(cur.fetchall())
+                conn.close()
+            except Exception as e:
+                print("Error loading Delivery Challans:", e)
+
+            # Sort the merged list in memory by date descending
+            def parse_date(date_str):
+                try:
+                    return tuple(map(int, date_str.split('-')))
+                except:
+                    return (0, 0, 0)
+            rows.sort(key=lambda x: parse_date(x[2]), reverse=True)
             currency = self.app.currency_symbol_var.get()
             
             for r in rows:
@@ -1109,6 +1174,11 @@ class DashboardPanel:
             sel = tv.selection()
             if not sel:
                 messagebox.showwarning("Error", "Select a record first!", parent=d_win)
+                return
+            
+            doc_type = tv.item(sel[0])['values'][0]
+            if doc_type != 'Quotation':
+                messagebox.showwarning("Load Warning", "You can only load Quotations directly from this view. To manage Invoices or Challans, please use their respective Managers.")
                 return
             
             ref_no = tv.item(sel[0])['values'][1] # Fixed: index was 0 (type), should be 1 (ref)
@@ -1149,31 +1219,42 @@ class DashboardPanel:
         q_c = t_c = c_c = 0
 
         try:
-            # Quotations
-            self.app.cursor.execute(
-                "SELECT COUNT(*) FROM quotations WHERE client_name=? AND date LIKE ?",
-                (client_name, month_key),
-            )
-            q_c = int(self.app.cursor.fetchone()[0] or 0)
-
-            # Tax invoices
+            # 1. Quotations
             try:
                 self.app.cursor.execute(
+                    "SELECT COUNT(*) FROM quotations WHERE client_name=? AND date LIKE ?",
+                    (client_name, month_key),
+                )
+                q_c = int(self.app.cursor.fetchone()[0] or 0)
+            except Exception as e:
+                print("Error loading Quotation count:", e)
+
+            # 2. Tax invoices
+            try:
+                conn = sqlite3.connect("TaxInvoice_Manager.db")
+                cur = conn.cursor()
+                cur.execute(
                     "SELECT COUNT(*) FROM tax_invoices WHERE client_name=? AND date LIKE ?",
                     (client_name, month_key),
                 )
-                t_c = int(self.app.cursor.fetchone()[0] or 0)
-            except Exception:
+                t_c = int(cur.fetchone()[0] or 0)
+                conn.close()
+            except Exception as e:
+                print("Error loading Tax Invoice count:", e)
                 t_c = 0
 
-            # Commercial invoices
+            # 3. Commercial invoices
             try:
-                self.app.cursor.execute(
+                conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                cur = conn.cursor()
+                cur.execute(
                     "SELECT COUNT(*) FROM commercial_invoices WHERE client_name=? AND date LIKE ?",
                     (client_name, month_key),
                 )
-                c_c = int(self.app.cursor.fetchone()[0] or 0)
-            except Exception:
+                c_c = int(cur.fetchone()[0] or 0)
+                conn.close()
+            except Exception as e:
+                print("Error loading Commercial Invoice count:", e)
                 c_c = 0
         except Exception as e:
             messagebox.showerror("Error", f"Count load failed: {e}")

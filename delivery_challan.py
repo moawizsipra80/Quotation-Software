@@ -105,7 +105,9 @@ class DeliveryChallanApp(QuotationApp):
         self.header_rows = [] 
        
         self.doc_title_var.set("Delivery Chalan") 
-        self.quotation_no_var.set("55")
+        next_dc = self._get_next_ref("delivery_challans", "DC-")
+        self.quotation_no_var.set(next_dc)
+        self.dc_no_var.set(next_dc)
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
@@ -140,8 +142,8 @@ class DeliveryChallanApp(QuotationApp):
             
             # Map Quotation No to Ref Quote
             self.ref_quot_no_var.set(h.get("quot_no", ""))
-            self.dc_no_var.set("DC-NEW") 
-            
+            self.quotation_no_var.set("DC-NEW") 
+            # self.dc_no_var.set("DC-NEW") # Keep separate if needed, but GUI uses quotation_no_var
             # Restore Items & Colors
             self.items_data = data.get("items", [])
             self.row_colors = {int(k): v for k, v in data.get("colors", {}).items()}
@@ -182,19 +184,20 @@ class DeliveryChallanApp(QuotationApp):
             messagebox.showerror("Error", f"Image Load Error: {e}")
 
     def on_closing(self):
-        """Optimized closing: Instantly restores dashboard and saves in background"""
+        """Optimized closing: Instantly restores dashboard and saves cleanly"""
+        if not self.confirm_and_save_before_closing():
+            return # Abort!
+            
         try:
+            if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
+                self.root.after_cancel(self.auto_save_timer)
+
             # 1. Restore dashboard immediately for instant feel
             if hasattr(self, 'original_root') and self.original_root:
                 try: self.original_root.deiconify()
                 except: pass
             
-            # 2. Save in background thread so it doesn't block UI closure
-            if self.client_name_var.get().strip():
-                import threading
-                threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
-                
-            print("✅ Challan closure initiated")
+            print("✅ Challan closure clean")
         except Exception as e:
             print(f"Close warning (non-critical): {e}")
         finally:
@@ -209,28 +212,36 @@ class DeliveryChallanApp(QuotationApp):
     # --- DATABASE FUNCTIONS FOR CHALLAN ---
     # Using parent's init_database (SQLite) now for speed
     def init_database(self):
-        super().init_database()
+        try:
+            import sqlite3
+            self.db_name = "DeliveryChallan_Manager.db"
+            self.conn = sqlite3.connect(self.db_name, timeout=30, check_same_thread=False)
+            self.cursor = self.conn.cursor()
+            # Ensure the table exists in this database
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS delivery_challans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ref_no TEXT UNIQUE,
+                    client_name TEXT,
+                    date TEXT,
+                    grand_total REAL,
+                    full_data TEXT
+                )
+            """)
+            self.conn.commit()
+            print("✅ Connected to separate database DeliveryChallan_Manager.db")
+        except Exception as e:
+            print(f"DB Connection Error: {e}")
 
     def auto_save_loop(self):
-        """Optimized auto-save loop to avoid UI hangs"""
+        """Optimized auto-save: Avoids threading for SQLite to prevent cursor errors"""
         try:
             if not self.root.winfo_exists(): return
         except: return
 
         if self.client_name_var.get().strip() and len(self.items_data) > 0:
-             import threading
-             # Pre-fetch data to avoid variable access in thread
-             try:
-                 data_to_save = {
-                     'ref_no': self.quotation_no_var.get(),
-                     'client_name': self.client_name_var.get(),
-                     'date': self.doc_date_var.get(),
-                     'items': copy.deepcopy(self.items_data)
-                 }
-             except: data_to_save = None
-
-             if data_to_save:
-                 threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
+             # Run save directly but silently
+             self.save_to_database(silent=True)
              
         try:
             if self.root.winfo_exists():
@@ -239,6 +250,14 @@ class DeliveryChallanApp(QuotationApp):
 
     def go_to_dashboard(self):
         self.on_closing() 
+
+    def open_history_hub(self):
+        orig_root = getattr(self, 'original_root', None)
+        self.on_closing()
+        if orig_root:
+            from delivery_selector import open_dc_hub
+            orig_root.withdraw()
+            open_dc_hub(orig_root)
 
     # =========================================================
     #  3. HEADER GUI
@@ -252,6 +271,7 @@ class DeliveryChallanApp(QuotationApp):
         btn_fr.pack(fill='x', pady=2)
         ttk.Button(btn_fr, text="💾 Save Invoice", command=self.save_to_database).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📊 Back to Dashboard", command=self.go_to_dashboard).pack(side='left', padx=5)
+        ttk.Button(btn_fr, text="📂 Open Saved/History", command=self.open_history_hub).pack(side='left', padx=5)
         # --- IMPORT SECTION ---
         ttk.Label(btn_fr, text="| Load: ").pack(side='left', padx=(10, 2))
         
@@ -471,6 +491,9 @@ class DeliveryChallanApp(QuotationApp):
 
     def on_preview_click(self):
         """PDF Preview logic for Delivery Challan (Robust Threading)"""
+        if getattr(self, 'is_generating_pdf', False):
+            return
+        self.is_generating_pdf = True
         import threading
         
         # 1. Pre-fetch ALL data from UI thread (CRITICAL for thread safety)
@@ -580,6 +603,7 @@ class DeliveryChallanApp(QuotationApp):
                         try:
                             if wait.winfo_exists(): wait.destroy()
                         except: pass
+                        setattr(self, 'is_generating_pdf', False)
                         messagebox.showerror("Error", "Preview file could not be created.")
                         
                 self.root.after(0, finish)
@@ -590,6 +614,7 @@ class DeliveryChallanApp(QuotationApp):
                         if wait.winfo_exists():
                             wait.destroy()
                     except: pass
+                    setattr(self, 'is_generating_pdf', False)
                     messagebox.showerror("Preview Error", f"Failed to generate PDF:\n{err_msg}")
                 self.root.after(0, on_err)
 
@@ -1033,7 +1058,7 @@ class DeliveryChallanApp(QuotationApp):
         import json
         data_packet = {
             "header": {
-                "ref_no": self.dc_no_var.get(), # Verify variable name
+                "ref_no": self.dc_no_var.get(), 
                 "date": self.doc_date_var.get(),
                 "client_name": self.client_name_var.get()
             },
@@ -1041,7 +1066,6 @@ class DeliveryChallanApp(QuotationApp):
         }
         json_str = json.dumps(data_packet)
         
-        # Challan ki amount usually 0 hoti hai, ya agar aap calculate karte hain to wo variable lein
         val = 0.0 
 
         try:
@@ -1051,20 +1075,31 @@ class DeliveryChallanApp(QuotationApp):
                     UPDATE delivery_challans
                     SET ref_no=?, client_name=?, date=?, grand_total=?, full_data=?
                     WHERE id=?
-                """, (self.dc_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str, self.current_db_id))
+                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str, self.current_db_id))
             else:
+                # ✅ UNIQUE CHECK
+                self.cursor.execute("SELECT id FROM delivery_challans WHERE ref_no=?", (self.quotation_no_var.get(),))
+                exists = self.cursor.fetchone()
+                if exists:
+                    if not silent:
+                        messagebox.showerror("Duplicate Ref No", f"Dc No '{self.quotation_no_var.get()}' already exists!\nPlease use a different number.")
+                    return False
+
                 self.cursor.execute("""
                     INSERT INTO delivery_challans (ref_no, client_name, date, grand_total, full_data)
                     VALUES (?,?,?,?,?)
-                """, (self.dc_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str))
+                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str))
                 
                 self.current_db_id = self.cursor.lastrowid
             
             self.conn.commit()
+            self.is_saved = True
             if not silent: messagebox.showinfo("Saved", "Challan Database Updated!")
+            return True
             
         except Exception as e:
             if not silent: messagebox.showerror("DB Error", str(e))
+            return False
    
 
 
@@ -1097,18 +1132,21 @@ class DeliveryChallanApp(QuotationApp):
         
         # 3. SQL Server se Data Lao
         try:
-            # Connect to SQLite
+            # Map table name to its dedicated database file
             db_name = "QuotationManager_Final.db"
+            if table_name == "delivery_challans":
+                db_name = "DeliveryChallan_Manager.db"
+            elif table_name == "commercial_invoices":
+                db_name = "CommercialInvoice_Manager.db"
+            elif table_name == "tax_invoices":
+                db_name = "TaxInvoice_Manager.db"
+
             conn = sqlite3.connect(db_name)
             cursor = conn.cursor()
             
-            # ✅ COLUMN FIX: Table ke hisaab se column name chuno
-            col_inv = "inv_no"
+            # All tables use 'ref_no' and 'date' columns consistently
+            col_inv = "ref_no"
             col_date = "date"
-            
-            if table_name == "delivery_challans":
-                col_inv = "dc_no"   # DC table main iska naam dc_no hai
-                col_date = "dc_date" # DC table main iska naam dc_date hai
             
             # Query
             query = f"SELECT id, {col_inv}, client_name, {col_date}, grand_total FROM {table_name} ORDER BY id DESC"
@@ -1145,7 +1183,15 @@ class DeliveryChallanApp(QuotationApp):
     def load_invoice_by_id(self, table_name, inv_id):
         """ID ke zariye SQLite se full JSON data fetch karke form fill karta hai."""
         try:
+            # Map table name to its dedicated database file
             db_name = "QuotationManager_Final.db"
+            if table_name == "delivery_challans":
+                db_name = "DeliveryChallan_Manager.db"
+            elif table_name == "commercial_invoices":
+                db_name = "CommercialInvoice_Manager.db"
+            elif table_name == "tax_invoices":
+                db_name = "TaxInvoice_Manager.db"
+
             conn = sqlite3.connect(db_name)
             cursor = conn.cursor()
             
@@ -1200,6 +1246,9 @@ class DeliveryChallanApp(QuotationApp):
     def restore_data(self, json_str):
         # Parent ka restore call karein taake items aur header load ho jayein
         super().restore_data(json_str)
+        
+        # Sync DC Number from Parent's generic loader
+        self.dc_no_var.set(self.quotation_no_var.get())
         
         data = json.loads(json_str)
         

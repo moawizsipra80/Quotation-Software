@@ -1,103 +1,211 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
-from invoice import InvoiceApp 
-
-
+from invoice import InvoiceApp
 
 def open_invoice_hub(root_window):
-    """Ye function Dashboard se call hoga"""
+    """Ye Sales Tax Invoices ka History/Converter Hub hai"""
     
     # Popup Window
     hub = tk.Toplevel(root_window)
-    hub.title("Invoice Manager")
-    hub.geometry("700x600")
+    hub.title("Sales Tax Invoice Manager")
+    hub.geometry("900x650")
     
     def on_hub_close():
         root_window.deiconify()
         hub.destroy()
     hub.protocol("WM_DELETE_WINDOW", on_hub_close)
-    # hub.transient(root_window) # Removed to allow maximize/minimize
     
-    ttk.Label(hub, text="Create Commercial Invoice", font=("Segoe UI", 14, "bold")).pack(pady=15)
+    lbl = tk.Label(hub, text="Sales Tax Invoice Manager", font=("Segoe UI", 16, "bold"), fg="#16a34a")
+    lbl.pack(pady=10)
+
+    # --- TABS (History, Quote Convert, Commercial Convert) ---
+    tabs = ttk.Notebook(hub)
+    tabs.pack(fill='both', expand=True, padx=10, pady=5)
+
+    # =========================================================
+    # TAB 1: EXISTING TAX INVOICES (History)
+    # =========================================================
+    tab1 = ttk.Frame(tabs)
+    tabs.add(tab1, text="📂 Saved Tax History")
+
+    cols = ("ID", "Inv No", "Client", "Date", "Amount")
+    tree = ttk.Treeview(tab1, columns=cols, show='headings', height=10)
+    tree.heading("ID", text="ID"); tree.column("ID", width=40, anchor="center")
+    tree.heading("Inv No", text="Inv No"); tree.column("Inv No", width=80)
+    tree.heading("Client", text="Client Name"); tree.column("Client", width=200)
+    tree.heading("Date", text="Date"); tree.column("Date", width=100)
+    tree.heading("Amount", text="Total"); tree.column("Amount", width=100)
     
-    # Option 1: Create New Blank
-    def open_blank():
-        hub.destroy()
-        new_win = tk.Toplevel(root_window)
-        new_win.title("Commercial Sales Invoice Generator")
-        new_win.geometry("1200x800")
-        # ✅ NEW: Proper close handler for clean exit
-        new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-        app = InvoiceApp(new_win)  # Blank Invoice
-    
-    btn_new = ttk.Button(hub, text="➕ Create New Blank Invoice",
-                         command=open_blank)
-    btn_new.pack(fill='x', padx=50, pady=5)
-    
-    ttk.Separator(hub, orient='horizontal').pack(fill='x', padx=20, pady=15)
-    
-    # Option 2: Convert from Quotation
-    ttk.Label(hub, text="OR Convert Existing Quotation:", font=("Segoe UI", 10)).pack()
-    
-    # List of Quotations (Searchable List)
-    frame_list = ttk.Frame(hub)
-    frame_list.pack(fill='both', expand=True, padx=20, pady=5)
-    
-    cols = ("ID", "Quot No", "Client", "Amount")
-    tree = ttk.Treeview(frame_list, columns=cols, show='headings', height=8)
-    tree.heading("ID", text="ID"); tree.column("ID", width=40)
-    tree.heading("Quot No", text="Ref No"); tree.column("Quot No", width=100)
-    tree.heading("Client", text="Client Name"); tree.column("Client", width=150)
-    tree.heading("Amount", text="Total"); tree.column("Amount", width=80)
-    
-    sb = ttk.Scrollbar(frame_list, orient="vertical", command=tree.yview)
+    sb = ttk.Scrollbar(tab1, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=sb.set)
     tree.pack(side='left', fill='both', expand=True)
     sb.pack(side='right', fill='y')
-    
-    # Load Data from DB
-    conn = sqlite3.connect("quotation.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, quot_no, client_name, grand_total FROM quotes ORDER BY id DESC")
-    for row in cursor.fetchall():
-        tree.insert("", "end", values=row)
-    conn.close()
-    
-    def convert_selected():
-        sel = tree.selection()
-        if not sel:
-            messagebox.showwarning("Warning", "Please select a Quotation to convert!")
-            return
-        
-        quot_id = tree.item(sel[0])['values'][0]
-        
-        # Fetch Full Data
-        conn = sqlite3.connect("quotation.db")
-        cur = conn.cursor()
-        cur.execute("SELECT full_data FROM quotes WHERE id=?", (quot_id,))
-        record = cur.fetchone()
-        conn.close()
-        
-        if record:
-            hub.destroy()
-            new_win = tk.Toplevel(root_window)
-            new_win.title("Commercial Sales Invoice Generator")
-            new_win.geometry("1200x800")
-            
-            new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-            # Yahan hum Data pass kar rahe hain InvoiceApp ko
-            app = InvoiceApp(new_win, from_quotation_data=record[0])
-    
-    btn_convert = ttk.Button(hub, text="⬇ Load & Convert to Invoice",
-                             command=convert_selected)
-    btn_convert.pack(fill='x', padx=50, pady=20)
 
-# ✅ NEW GLOBAL FUNCTION: Clean invoice window close
+    def load_history():
+        for i in tree.get_children(): 
+            tree.delete(i)
+        try:
+            conn = sqlite3.connect("TaxInvoice_Manager.db")
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
+            if cur.fetchone():
+                cur.execute("SELECT id, ref_no, client_name, date, grand_total FROM tax_invoices ORDER BY id DESC")
+                for row in cur.fetchall():
+                    amt = f"{row[4]:,.0f}" if row[4] else "0"
+                    tree.insert("", "end", values=(row[0], row[1], row[2], row[3], amt))
+            conn.close()
+        except Exception as e:
+            print("DB Error:", e)
+
+    load_history()
+
+    def open_selected_invoice():
+        sel = tree.selection()
+        if not sel: 
+            messagebox.showwarning("Warning", "Please select a Tax Invoice to open!")
+            return
+        inv_id = tree.item(sel[0])['values'][0]
+        try:
+            conn = sqlite3.connect("TaxInvoice_Manager.db")
+            cur = conn.cursor()
+            cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                hub.destroy()
+                new_win = tk.Toplevel(root_window)
+                new_win.geometry("1200x800")
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
+                app = InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+                app.current_db_id = inv_id  # Existing ID for Update
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    tree.bind("<Double-1>", lambda event: open_selected_invoice())
+    ttk.Button(tab1, text="📂 Open Selected Sales Tax Invoice", command=open_selected_invoice).pack(fill='x', padx=50, pady=10)
+
+    # =========================================================
+    # TAB 2: CONVERT QUOTATION (New from Quote)
+    # =========================================================
+    tab2 = ttk.Frame(tabs)
+    tabs.add(tab2, text="🔄 Convert Quotation")
+    
+    cols2 = ("ID", "Quot No", "Client", "Amount")
+    tree2 = ttk.Treeview(tab2, columns=cols2, show='headings', height=10)
+    tree2.heading("ID", text="ID"); tree2.column("ID", width=40, anchor="center")
+    tree2.heading("Quot No", text="Ref No"); tree2.column("Quot No", width=100)
+    tree2.heading("Client", text="Client Name"); tree2.column("Client", width=200)
+    tree2.heading("Amount", text="Total"); tree2.column("Amount", width=100)
+    
+    sb2 = ttk.Scrollbar(tab2, orient="vertical", command=tree2.yview)
+    tree2.configure(yscrollcommand=sb2.set)
+    tree2.pack(side='left', fill='both', expand=True)
+    sb2.pack(side='right', fill='y')
+
+    try:
+        conn = sqlite3.connect("QuotationManager_Final.db")
+        cur = conn.cursor()
+        cur.execute("SELECT id, ref_no, client_name, grand_total FROM quotations ORDER BY id DESC")
+        for row in cur.fetchall():
+            tree2.insert("", "end", values=row)
+        conn.close()
+    except: 
+        pass
+
+    def convert_quote():
+        sel = tree2.selection()
+        if not sel: 
+            messagebox.showwarning("Warning", "Select a Quotation first!")
+            return
+        q_id = tree2.item(sel[0])['values'][0]
+        try:
+            conn = sqlite3.connect("QuotationManager_Final.db")
+            cur = conn.cursor()
+            cur.execute("SELECT full_data FROM quotations WHERE id=?", (q_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                hub.destroy()
+                new_win = tk.Toplevel(root_window)
+                new_win.geometry("1200x800")
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
+                InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    tree2.bind("<Double-1>", lambda event: convert_quote())
+    ttk.Button(tab2, text="⬇ Load Quotation into Sales Tax Invoice", command=convert_quote).pack(fill='x', padx=50, pady=10)
+
+    # =========================================================
+    # TAB 3: CONVERT COMMERCIAL INVOICE
+    # =========================================================
+    tab3 = ttk.Frame(tabs)
+    tabs.add(tab3, text="🔄 Convert Commercial Invoice")
+    
+    cols3 = ("ID", "Inv No", "Client", "Amount")
+    tree3 = ttk.Treeview(tab3, columns=cols3, show='headings', height=10)
+    tree3.heading("ID", text="ID"); tree3.column("ID", width=40, anchor="center")
+    tree3.heading("Inv No", text="Inv No"); tree3.column("Inv No", width=100)
+    tree3.heading("Client", text="Client Name"); tree3.column("Client", width=200)
+    tree3.heading("Amount", text="Total"); tree3.column("Amount", width=100)
+    
+    sb3 = ttk.Scrollbar(tab3, orient="vertical", command=tree3.yview)
+    tree3.configure(yscrollcommand=sb3.set)
+    tree3.pack(side='left', fill='both', expand=True)
+    sb3.pack(side='right', fill='y')
+
+    try:
+        conn = sqlite3.connect("CommercialInvoice_Manager.db")
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_invoices'")
+        if cur.fetchone():
+            cur.execute("SELECT id, ref_no, client_name, grand_total FROM commercial_invoices ORDER BY id DESC")
+            for row in cur.fetchall():
+                tree3.insert("", "end", values=row)
+        conn.close()
+    except: 
+        pass
+
+    def convert_commercial_invoice():
+        sel = tree3.selection()
+        if not sel: 
+            messagebox.showwarning("Warning", "Select a Commercial Invoice first!")
+            return
+        inv_id = tree3.item(sel[0])['values'][0]
+        try:
+            conn = sqlite3.connect("CommercialInvoice_Manager.db")
+            cur = conn.cursor()
+            cur.execute("SELECT full_data FROM commercial_invoices WHERE id=?", (inv_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                hub.destroy()
+                new_win = tk.Toplevel(root_window)
+                new_win.geometry("1200x800")
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
+                InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    tree3.bind("<Double-1>", lambda event: convert_commercial_invoice())
+    ttk.Button(tab3, text="⬇ Load Commercial Invoice into Sales Tax Invoice", command=convert_commercial_invoice).pack(fill='x', padx=50, pady=10)
+
+    # --- FOOTER: Create Blank ---
+    ttk.Separator(hub, orient='horizontal').pack(fill='x', padx=10, pady=5)
+    
+    def open_blank():
+        hub.destroy()
+        new_win = tk.Toplevel(root_window)
+        new_win.geometry("1200x800")
+        new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
+        InvoiceApp(new_win, original_root=root_window)
+
+    ttk.Button(hub, text="➕ Create Fresh Blank Sales Tax Invoice", command=open_blank).pack(fill='x', padx=20, pady=10)
+
 def safe_close_invoice(win):
     """Invoice window properly close karega without polluting main app"""
     try:
-        # ✅ RESTORE DASHBOARD
         if win.master:
             win.master.deiconify()
         print("✅ Invoice window closed cleanly")

@@ -51,6 +51,7 @@ class InvoiceApp(QuotationApp):
         
         # 3) Parent init
         super().__init__(root) 
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # 4) Invoice-specific overrides
         self.root.resizable(True, True)
@@ -62,7 +63,7 @@ class InvoiceApp(QuotationApp):
         
         self.root.title(" Sales TAX Invoice ")
         self.doc_title_var.set("Sales Tax Invoice") 
-        self.quotation_no_var.set("55")
+        self.quotation_no_var.set(self._get_next_ref("tax_invoices", "INV-"))
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
@@ -129,25 +130,7 @@ class InvoiceApp(QuotationApp):
             lbl.config(image='', text="")
             lbl.image = None
 
-    def on_closing(self):
-        try:
-            if self.auto_save_timer:
-                self.root.after_cancel(self.auto_save_timer)
-                self.auto_save_timer = None
-        except: pass
 
-        try:
-            self.save_to_database(silent=True) 
-            # ✅ RESTORE DASHBOARD
-            if self.root.master:
-                self.root.master.deiconify()
-                self.root.master.lift()
-                self.root.master.focus_force()
-            print("✅ Invoice saved & closed cleanly")
-        except Exception as e:
-            print(f"Close warning (non-critical): {e}")
-        finally:
-            self.root.destroy() 
 
     def _init_standard_header_rows(self):
         self.header_rows = []
@@ -156,14 +139,27 @@ class InvoiceApp(QuotationApp):
     def init_database(self):
         try:
             import sqlite3
-            db_name = "QuotationManager_Final.db"
-            self.conn = sqlite3.connect(db_name)
+            self.db_name = "TaxInvoice_Manager.db"
+            self.conn = sqlite3.connect(self.db_name)
             self.cursor = self.conn.cursor()
+            # Ensure the table exists in this database
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tax_invoices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ref_no TEXT UNIQUE,
+                    client_name TEXT,
+                    date TEXT,
+                    grand_total REAL,
+                    full_data TEXT
+                )
+            """)
+            self.conn.commit()
+            print("✅ Connected to separate database TaxInvoice_Manager.db")
         except Exception as e:
             print(f"DB Connection Error: {e}")
 
     def auto_save_loop(self):
-        """Optimized auto-save loop to avoid UI hangs"""
+        """Optimized auto-save: Avoids threading for SQLite to prevent cursor errors"""
         try:
             if not self.root.winfo_exists():
                 return
@@ -172,9 +168,9 @@ class InvoiceApp(QuotationApp):
         if (hasattr(self, 'client_name_var') and 
             self.client_name_var.get().strip() and 
             len(self.items_data) > 0):
-             # Run save in a background task to keep UI responsive
-             import threading
-             threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
+             # Run save directly but silently. 
+             # SQLite doesn't like multi-threading with same connection.
+             self.save_to_database(silent=True)
              
         try:
             if self.root.winfo_exists():
@@ -184,20 +180,29 @@ class InvoiceApp(QuotationApp):
     def go_to_dashboard(self):
         self.on_closing() 
 
+    def open_history_hub(self):
+        orig_root = getattr(self, 'original_root', None)
+        self.on_closing()
+        if orig_root:
+            from invoice_selector import open_invoice_hub
+            orig_root.withdraw()
+            open_invoice_hub(orig_root)
+
     def on_closing(self):
-        """Optimized closing: Instantly restores dashboard and saves in background"""
+        """Optimized closing: Instantly restores dashboard and saves cleanly"""
+        if not self.confirm_and_save_before_closing():
+            return # Abort!
+            
         try:
+            if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
+                self.root.after_cancel(self.auto_save_timer)
+            
             # 1. Restore dashboard immediately
             if hasattr(self, 'original_root') and self.original_root:
                 try: self.original_root.deiconify()
                 except: pass
             
-            # 2. Save in background thread
-            if self.client_name_var.get().strip():
-                import threading
-                threading.Thread(target=lambda: self.save_to_database(silent=True), daemon=True).start()
-                
-            print("✅ Invoice closure initiated")
+            print("✅ Invoice closure clean")
         except Exception as e:
             print(f"Close warning: {e}")
         finally:
@@ -213,6 +218,7 @@ class InvoiceApp(QuotationApp):
         btn_fr.pack(fill='x', pady=2)
         ttk.Button(btn_fr, text="💾 Save Invoice", command=self.save_to_database).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📊 Back to Dashboard", command=self.go_to_dashboard).pack(side='left', padx=5)
+        ttk.Button(btn_fr, text="📂 Open Saved/History", command=self.open_history_hub).pack(side='left', padx=5)
         
         # ✅ FIXED: "Manage Header Rows" Button Restored
         ttk.Button(btn_fr, text="📑 Manage Header Rows", command=self.open_header_manager).pack(side='left', padx=5)
@@ -419,8 +425,17 @@ class InvoiceApp(QuotationApp):
     # =========================================================
     #  5. PDF GENERATOR
     # =========================================================
-    def _generate_pdf(self, path, pre_fetched_terms=None):
+    def _generate_pdf(self, path, pre_fetched_terms=None, ui_data_payload=None):
         if not os.path.dirname(path): return
+
+        # Use payload if available, else fallback to UI thread reads (risky)
+        d = ui_data_payload if ui_data_payload else {}
+        
+        # Helper to get from d or self
+        def get_v(key, var_name):
+            if key in d: return d[key]
+            try: return getattr(self, var_name).get()
+            except: return ""
 
         # ✅ CRITICAL: Move heavy imports here for fast startup
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, KeepTogether
@@ -500,29 +515,37 @@ class InvoiceApp(QuotationApp):
         
         # Details Rows (L + R fused)
         # L has 4 cols, R has 2 cols. Total 6 cols.
-        # R data rows 1-6
         rd = [
-            [mk_b("Quotation No."), mk_n(self.ref_quot_no_var.get())],
-            [mk_b("DC No"), mk_n(self.dc_no_var.get())],
-            [mk_b("S.T.N. No."), mk_n(self.vendor_stn_var.get())],
-            [mk_b("NTN:"), mk_n(self.vendor_ntn_var.get())],
-            [mk_b("PRA"), mk_n(self.vendor_pra_var.get())],
-            [mk_b("email"), mk_n(self.vendor_email_var.get())]
+            [mk_b("Quotation No."), mk_n(get_v('ref_quot_no', 'ref_quot_no_var'))],
+            [mk_b("DC No"), mk_n(get_v('dc_no', 'dc_no_var'))],
+            [mk_b("S.T.N. No."), mk_n(get_v('v_stn', 'vendor_stn_var'))],
+            [mk_b("NTN:"), mk_n(get_v('v_ntn', 'vendor_ntn_var'))],
+            [mk_b("PRA"), mk_n(get_v('v_pra', 'vendor_pra_var'))],
+            [mk_b("email"), mk_n(get_v('v_email', 'vendor_email_var'))]
         ]
         
         ld = [
-            [mk_b("Sales Tax Invoice No"), mk_n(self.quotation_no_var.get()), mk_b("PO No."), mk_n(self.rfq_no_var.get())],
-            [mk_b("Customer"), mk_n(self.client_name_var.get()), mk_b("S.T.N. NO:"), mk_n(self.client_stn_var.get())],
-            [mk_b("Address"), mk_n(self.client_addr_var.get()), mk_b("NTN:"), mk_n(self.client_ntn_var.get())],
-            [mk_b("Contact person"), mk_n(self.client_contact_var.get()), mk_b("Delivery date"), mk_n(self.delivery_date_var.get())],
-            [mk_b("Designation"), mk_n(self.client_designation_var.get()), mk_b("Delivered Through"), mk_n(self.delivered_through_var.get())],
-            [mk_b("email"), mk_n(self.client_email_var.get()), "", ""]
+            [mk_b("Sales Tax Invoice No"), mk_n(get_v('quot_no', 'quotation_no_var')), mk_b("PO No."), mk_n(get_v('rf_no', 'rfq_no_var'))],
+            [mk_b("Customer"), mk_n(get_v('c_name', 'client_name_var')), mk_b("S.T.N. NO:"), mk_n(get_v('c_stn', 'client_stn_var'))],
+            [mk_b("Address"), mk_n(get_v('c_addr', 'client_addr_var')), mk_b("NTN:"), mk_n(get_v('c_ntn', 'client_ntn_var'))],
+            [mk_b("Contact person"), mk_n(get_v('c_contact', 'client_contact_var')), mk_b("Delivery date"), mk_n(get_v('d_date', 'delivery_date_var'))],
+            [mk_b("Designation"), mk_n(get_v('c_desig', 'client_designation_var')), mk_b("Delivered Through"), mk_n(get_v('d_through', 'delivered_through_var'))],
+            [mk_b("email"), mk_n(get_v('c_email', 'client_email_var')), "", ""]
         ]
 
         for i in range(6):
             h_data.append(ld[i] + rd[i])
 
-        t_main = Table(h_data, colWidths=[85, 120, 75, 95, 70, 95]) # Total 540
+        titles = [
+            Paragraph(f"<b>{get_v('l_title', 'left_header_title')}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11)),
+            "", "", "",
+            Paragraph(f"<b>{get_v('r_title', 'right_header_title')}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11)),
+            ""
+        ]
+        
+        final_h_data = [titles] + h_data
+
+        t_main = Table(final_h_data, colWidths=[85, 120, 75, 95, 70, 95]) # Total 540
         t_main.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
             ('BOX', (0,0), (-1,-1), 1, colors.black),
@@ -783,6 +806,9 @@ class InvoiceApp(QuotationApp):
 
     def on_preview_click(self):
         """PDF Preview logic for Invoice (Multithreaded to avoid hangs)"""
+        if getattr(self, 'is_generating_pdf', False):
+            return
+        self.is_generating_pdf = True
         import threading
         
         # 1. Show Waiting Window
@@ -806,12 +832,45 @@ class InvoiceApp(QuotationApp):
         tk.Label(wait, text="🔄 Generating Invoice PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
         tk.Label(wait, text="This might take a few seconds...", font=("Arial", 9), fg="grey").pack()
         
-        # Pre-fetch slow data from UI thread (tagged_terms)
         try:
             tagged_terms = self._get_tagged_text()
         except:
             tagged_terms = ""
-        
+
+        # Pre-fetch all UI variables to avoid thread-safety issues
+        ui_data = {
+            "l_title": self.left_header_title.get(),
+            "r_title": self.right_header_title.get(),
+            "quot_no": self.quotation_no_var.get(),
+            "doc_date": self.doc_date_var.get(),
+            "c_name": self.client_name_var.get(),
+            "c_addr": self.client_addr_var.get(),
+            "c_stn": self.client_stn_var.get(),
+            "c_ntn": self.client_ntn_var.get(),
+            "c_contact": self.client_contact_var.get(),
+            "c_desig": self.client_designation_var.get(),
+            "c_email": self.client_email_var.get(),
+            "rf_no": self.rfq_no_var.get(),
+            "ref_quot_no": self.ref_quot_no_var.get(),
+            "dc_no": self.dc_no_var.get(),
+            "d_date": self.delivery_date_var.get(),
+            "d_through": self.delivered_through_var.get(),
+            "v_stn": self.vendor_stn_var.get(),
+            "v_ntn": self.vendor_ntn_var.get(),
+            "v_pra": self.vendor_pra_var.get(),
+            "v_email": self.vendor_email_var.get(),
+            "currency": self.currency_symbol_var.get(),
+            "g_total": self.grand_total_var.get() if hasattr(self, 'grand_total_var') else "0.00",
+            "footer_text": self.footer_text_var.get(),
+            "footer_align": self.footer_align_var.get(),
+            "footer_size": self.f_logo_size_var.get(),
+            "print_sub": self.print_subtotal_var.get(),
+            "print_tax": self.print_tax_var.get(),
+            "print_gt": self.print_grand_total_var.get(),
+            "subtotal": self.subtotal_var.get() if hasattr(self, 'subtotal_var') else "0.00",
+            "tax_total": self.tax_total_var.get() if hasattr(self, 'tax_total_var') else "0.00"
+        }
+
         self.root.update()
 
         def safe_destroy():
@@ -825,28 +884,18 @@ class InvoiceApp(QuotationApp):
                 fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
                 os.close(fd)
                 
-                # Pass pre-fetched terms
-                self._generate_pdf(tmp_path, pre_fetched_terms=tagged_terms) 
+                # Pass both terms and full payload
+                self._generate_pdf(tmp_path, pre_fetched_terms=tagged_terms, ui_data_payload=ui_data) 
                 
                 if os.path.exists(tmp_path):
                     self.root.after(0, lambda: self._show_preview_confirm(tmp_path, wait))
                 else:
-                    self.root.after(0, lambda: [safe_destroy(), messagebox.showerror("Error", "Preview file could not be created.")])
+                    self.root.after(0, lambda: [safe_destroy(), setattr(self, 'is_generating_pdf', False), messagebox.showerror("Error", "Preview file could not be created.")])
             except Exception as e:
                 err_msg = str(e)
-                self.root.after(0, lambda m=err_msg: [safe_destroy(), messagebox.showerror("Preview Error", m)])
+                self.root.after(0, lambda m=err_msg: [safe_destroy(), setattr(self, 'is_generating_pdf', False), messagebox.showerror("Preview Error", m)])
 
         threading.Thread(target=worker, daemon=True).start()
-
-    def _open_pdf(self, path):
-        try:
-            if os.name == 'nt':
-                os.startfile(path)
-            else:
-                import webbrowser
-                webbrowser.open("file://" + path)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open PDF: {e}")
 
     # --- Save & Utils ---
     def check_license(self): pass 
@@ -860,7 +909,6 @@ class InvoiceApp(QuotationApp):
         import json
         data_packet = {
             "header": {
-                # YAHAN CHANGE KIYA HAI: inv_no_var -> quotation_no_var
                 "ref_no": self.quotation_no_var.get(),
                 "date": self.doc_date_var.get(),
                 "client_name": self.client_name_var.get(),
@@ -873,7 +921,8 @@ class InvoiceApp(QuotationApp):
         try:
             import re
             txt = self.total_lbl.cget("text")
-            val = float(re.search(r"[\d,]+\.?\d*", txt).group().replace(',',''))
+            match = re.search(r"[\d,]+\.?\d*", txt)
+            val = float(match.group().replace(',','')) if match else 0.0
         except: val = 0.0
 
         try:
@@ -885,6 +934,14 @@ class InvoiceApp(QuotationApp):
                     WHERE id=?
                 """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str, self.current_db_id))
             else:
+                # ✅ UNIQUE CHECK: Prevent "UNIQUE constraint failed"
+                self.cursor.execute("SELECT id FROM tax_invoices WHERE ref_no=?", (self.quotation_no_var.get(),))
+                exists = self.cursor.fetchone()
+                if exists:
+                    if not silent: 
+                        messagebox.showerror("Duplicate Ref No", f"Invoice No '{self.quotation_no_var.get()}' already exists in database.\nPlease use a unique number.")
+                    return False
+
                 self.cursor.execute("""
                     INSERT INTO tax_invoices (ref_no, client_name, date, grand_total, full_data)
                     VALUES (?,?,?,?,?)
@@ -893,10 +950,13 @@ class InvoiceApp(QuotationApp):
                 self.current_db_id = self.cursor.lastrowid
             
             self.conn.commit()
+            self.is_saved = True
             if not silent: messagebox.showinfo("Saved", "Invoice Database Updated!")
+            return True
             
         except Exception as e:
             if not silent: messagebox.showerror("DB Error", str(e))
+            return False
     
      
     def load_from_quotation_data(self, json_data):

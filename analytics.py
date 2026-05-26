@@ -12,28 +12,39 @@ def _safe_amount(val):
 def get_analytics_data(conn, user=None):
     """
     Robust Analytics: Fetches data for Quotations, Invoices, and Delivery Challans.
+    Dynamically connects to decoupled manager databases to merge statistics accurately.
     Uses Pandas for grouping and date sorting.
     """
     try:
-        cursor = conn.cursor()
         data = []
 
-        # Tables to include in analytics
+        # Tables, Labels, and their respective database manager files
         config = {
-            "quotations": "Quotation",
-            "tax_invoices": "Tax Invoice",
-            "commercial_invoices": "Commercial Inv",
-            "delivery_challans": "Delivery Challan"
+            "quotations": ("Quotation", "QuotationManager_Final.db"),
+            "tax_invoices": ("Tax Invoice", "TaxInvoice_Manager.db"),
+            "commercial_invoices": ("Commercial Inv", "CommercialInvoice_Manager.db"),
+            "delivery_challans": ("Delivery Challan", "DeliveryChallan_Manager.db")
         }
         
-        for table, label in config.items():
+        for table, (label, db_file) in config.items():
             try:
+                # Establish temporary connection to the separate database file
+                temp_conn = sqlite3.connect(db_file)
+                temp_cursor = temp_conn.cursor()
+                
                 # Check if table exists
-                cursor.execute(f"PRAGMA table_info({table})")
-                cols = [c[1] for c in cursor.fetchall()]
-                if not cols: continue
+                temp_cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+                if not temp_cursor.fetchone():
+                    temp_conn.close()
+                    continue
                 
                 # Dynamic column detection
+                temp_cursor.execute(f"PRAGMA table_info({table})")
+                cols = [c[1] for c in temp_cursor.fetchall()]
+                if not cols: 
+                    temp_conn.close()
+                    continue
+                
                 d_col = 'date' if 'date' in cols else ('created_at' if 'created_at' in cols else None)
                 a_col = 'grand_total' if 'grand_total' in cols else ('total_amount' if 'total_amount' in cols else None)
                 u_col = 'created_by' if 'created_by' in cols else None
@@ -46,13 +57,14 @@ def get_analytics_data(conn, user=None):
                         query += f" AND {u_col} = ?"
                         params.append(user)
                     
-                    cursor.execute(query, params)
-                    rows = cursor.fetchall()
+                    temp_cursor.execute(query, params)
+                    rows = temp_cursor.fetchall()
                     for d, amt in rows:
                         if d:
                             data.append({"date": str(d), "grand_total": _safe_amount(amt), "source": table})
+                temp_conn.close()
             except Exception as tbl_err:
-                print(f"Error fetching from {table}: {tbl_err}")
+                print(f"Error fetching from {table} inside {db_file}: {tbl_err}")
 
         if not data:
             return None

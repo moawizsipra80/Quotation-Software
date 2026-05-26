@@ -9,8 +9,12 @@ def open_commercial_hub(root_window):
     # Popup Window
     hub = tk.Toplevel(root_window)
     hub.title("Commercial Invoice Manager")
-    hub.geometry("900x650") # Thora size barha diya
-    # hub.transient(root_window) # Removed to allow maximize/minimize
+    hub.geometry("900x650")
+    
+    def on_hub_close():
+        root_window.deiconify()
+        hub.destroy()
+    hub.protocol("WM_DELETE_WINDOW", on_hub_close)
     
     lbl = tk.Label(hub, text="Commercial Invoice Manager", font=("Segoe UI", 16, "bold"), fg="#d35400")
     lbl.pack(pady=10)
@@ -27,7 +31,7 @@ def open_commercial_hub(root_window):
 
     cols = ("ID", "Inv No", "Client", "Date", "Amount")
     tree = ttk.Treeview(tab1, columns=cols, show='headings', height=10)
-    tree.heading("ID", text="ID"); tree.column("ID", width=40)
+    tree.heading("ID", text="ID"); tree.column("ID", width=40, anchor="center")
     tree.heading("Inv No", text="Inv No"); tree.column("Inv No", width=80)
     tree.heading("Client", text="Client Name"); tree.column("Client", width=200)
     tree.heading("Date", text="Date"); tree.column("Date", width=100)
@@ -39,13 +43,14 @@ def open_commercial_hub(root_window):
     sb.pack(side='right', fill='y')
 
     def load_history():
-        for i in tree.get_children(): tree.delete(i)
+        for i in tree.get_children(): 
+            tree.delete(i)
         try:
-            conn = sqlite3.connect("quotation.db")
+            conn = sqlite3.connect("CommercialInvoice_Manager.db")
             cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_table'")
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_invoices'")
             if cur.fetchone():
-                cur.execute("SELECT id, inv_no, client_name, inv_date, grand_total FROM commercial_table ORDER BY id DESC")
+                cur.execute("SELECT id, ref_no, client_name, date, grand_total FROM commercial_invoices ORDER BY id DESC")
                 for row in cur.fetchall():
                     amt = f"{row[4]:,.0f}" if row[4] else "0"
                     tree.insert("", "end", values=(row[0], row[1], row[2], row[3], amt))
@@ -57,25 +62,28 @@ def open_commercial_hub(root_window):
 
     def open_selected_invoice():
         sel = tree.selection()
-        if not sel: return
+        if not sel: 
+            messagebox.showwarning("Warning", "Select a Commercial Invoice first!")
+            return
         inv_id = tree.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("quotation.db")
+            conn = sqlite3.connect("CommercialInvoice_Manager.db")
             cur = conn.cursor()
-            cur.execute("SELECT full_data FROM commercial_table WHERE id=?", (inv_id,))
+            cur.execute("SELECT full_data FROM commercial_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
             conn.close()
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 new_win.geometry("1200x800")
-                app = CommercialApp(new_win, from_quotation_data=row[0])
-                app.current_db_id = inv_id # Existing ID for Update
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
+                app = CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
+                app.current_db_id = inv_id  # Existing ID for Update
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    tree.bind("<Double-1>", lambda event: open_selected_invoice())
     ttk.Button(tab1, text="📂 Open Selected Commercial Invoice", command=open_selected_invoice).pack(fill='x', padx=50, pady=10)
-
 
     # =========================================================
     # TAB 2: CONVERT QUOTATION (New from Quote)
@@ -85,7 +93,7 @@ def open_commercial_hub(root_window):
     
     cols2 = ("ID", "Quot No", "Client", "Amount")
     tree2 = ttk.Treeview(tab2, columns=cols2, show='headings', height=10)
-    tree2.heading("ID", text="ID"); tree2.column("ID", width=40)
+    tree2.heading("ID", text="ID"); tree2.column("ID", width=40, anchor="center")
     tree2.heading("Quot No", text="Ref No"); tree2.column("Quot No", width=100)
     tree2.heading("Client", text="Client Name"); tree2.column("Client", width=200)
     tree2.heading("Amount", text="Total"); tree2.column("Amount", width=100)
@@ -96,44 +104,48 @@ def open_commercial_hub(root_window):
     sb2.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("quotation.db")
+        conn = sqlite3.connect("QuotationManager_Final.db")
         cur = conn.cursor()
-        cur.execute("SELECT id, quot_no, client_name, grand_total FROM quotes ORDER BY id DESC")
+        cur.execute("SELECT id, ref_no, client_name, grand_total FROM quotations ORDER BY id DESC")
         for row in cur.fetchall():
             tree2.insert("", "end", values=row)
         conn.close()
-    except: pass
+    except: 
+        pass
 
     def convert_quote():
         sel = tree2.selection()
-        if not sel: return
+        if not sel: 
+            messagebox.showwarning("Warning", "Select a Quotation first!")
+            return
         q_id = tree2.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("quotation.db")
+            conn = sqlite3.connect("QuotationManager_Final.db")
             cur = conn.cursor()
-            cur.execute("SELECT full_data FROM quotes WHERE id=?", (q_id,))
+            cur.execute("SELECT full_data FROM quotations WHERE id=?", (q_id,))
             row = cur.fetchone()
             conn.close()
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 new_win.geometry("1200x800")
-                CommercialApp(new_win, from_quotation_data=row[0])
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
+                CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    tree2.bind("<Double-1>", lambda event: convert_quote())
     ttk.Button(tab2, text="⬇ Load Quotation into Commercial Invoice", command=convert_quote).pack(fill='x', padx=50, pady=10)
 
-
     # =========================================================
-    # TAB 3: CONVERT SALES TAX INVOICE (New from Invoice) - NEW ADDITION
+    # TAB 3: CONVERT SALES TAX INVOICE (New from Invoice)
     # =========================================================
     tab3 = ttk.Frame(tabs)
     tabs.add(tab3, text="🔄 Convert Sales Tax Invoice")
     
     cols3 = ("ID", "Inv No", "Client", "Amount")
     tree3 = ttk.Treeview(tab3, columns=cols3, show='headings', height=10)
-    tree3.heading("ID", text="ID"); tree3.column("ID", width=40)
+    tree3.heading("ID", text="ID"); tree3.column("ID", width=40, anchor="center")
     tree3.heading("Inv No", text="Inv No"); tree3.column("Inv No", width=100)
     tree3.heading("Client", text="Client Name"); tree3.column("Client", width=200)
     tree3.heading("Amount", text="Total"); tree3.column("Amount", width=100)
@@ -144,45 +156,60 @@ def open_commercial_hub(root_window):
     sb3.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("quotation.db")
+        conn = sqlite3.connect("TaxInvoice_Manager.db")
         cur = conn.cursor()
-        # Yahan hum 'invoices' table se data utha rahe hain (Sales Tax Invoices)
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
         if cur.fetchone():
-            cur.execute("SELECT id, inv_no, client_name, grand_total FROM invoices ORDER BY id DESC")
+            cur.execute("SELECT id, ref_no, client_name, grand_total FROM tax_invoices ORDER BY id DESC")
             for row in cur.fetchall():
                 tree3.insert("", "end", values=row)
         conn.close()
-    except: pass
+    except: 
+        pass
 
     def convert_sales_invoice():
         sel = tree3.selection()
-        if not sel: return
+        if not sel: 
+            messagebox.showwarning("Warning", "Select a Sales Tax Invoice first!")
+            return
         inv_id = tree3.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("quotation.db")
+            conn = sqlite3.connect("TaxInvoice_Manager.db")
             cur = conn.cursor()
-            cur.execute("SELECT full_data FROM invoices WHERE id=?", (inv_id,))
+            cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
             conn.close()
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 new_win.geometry("1200x800")
-                # Data wahi pass hoga, format same hai
-                CommercialApp(new_win, from_quotation_data=row[0])
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
+                CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
+    tree3.bind("<Double-1>", lambda event: convert_sales_invoice())
     ttk.Button(tab3, text="⬇ Load Sales Invoice into Commercial Invoice", command=convert_sales_invoice).pack(fill='x', padx=50, pady=10)
-
 
     # --- FOOTER: Create Blank ---
     ttk.Separator(hub, orient='horizontal').pack(fill='x', padx=10, pady=5)
+    
     def open_blank():
         hub.destroy()
         new_win = tk.Toplevel(root_window)
         new_win.geometry("1200x800")
-        CommercialApp(new_win)
+        new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
+        CommercialApp(new_win, original_root=root_window)
 
     ttk.Button(hub, text="➕ Create Fresh Blank Commercial Invoice", command=open_blank).pack(fill='x', padx=20, pady=10)
+
+def safe_close_commercial(win):
+    """Commercial window properly close karega without polluting main app"""
+    try:
+        if win.master:
+            win.master.deiconify()
+        print("✅ Commercial window closed cleanly")
+    except:
+        pass
+    finally:
+        win.destroy()

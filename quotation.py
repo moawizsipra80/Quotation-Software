@@ -7,6 +7,14 @@ import tempfile
 import webbrowser
 import re
 import sys
+# Force UTF-8 encoding for standard output/error to prevent charmap/UnicodeEncodeError on Windows
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
 # import pyodbc
 import sqlite3
 import shutil 
@@ -39,7 +47,7 @@ try:
     import docx
     from docx.shared import Pt, Inches, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.shared import OxmlElement
+    from docx.oxml import OxmlElement
     from docx.table import _Cell
     try:
         from docx.enum.table import WD_ALIGN_VERTICAL
@@ -73,6 +81,7 @@ openpyxl = None
 try:
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.drawing.image import Image as OpenpyxlImage
 except ImportError:
     pass
 
@@ -312,6 +321,10 @@ class QuotationApp:
         self.auto_save_timer = None
         self.current_db_id = None  # Track current quotation ID in database
         self.current_dashboard = None
+        self.is_saved = True  # Track unsaved changes
+        try:
+            self.root.bind("<KeyPress>", lambda e: self.mark_unsaved(), add="+")
+        except: pass
 
         # --- CUSTOM COLUMNS SETUP ---
         self.columns_config = [
@@ -395,6 +408,9 @@ class QuotationApp:
 
     def on_closing(self):
         """Safely handle application shutdown"""
+        if not self.confirm_and_save_before_closing():
+            return
+            
         try:
             if self.auto_save_timer:
                  self.root.after_cancel(self.auto_save_timer)
@@ -552,7 +568,7 @@ class QuotationApp:
         ttk.Button(btn_frame, text="USE TRIAL VERSION", command=start_trial, bootstyle="secondary", width=30).pack(pady=10, ipady=5)
         ttk.Button(btn_frame, text="I HAVE AN ACCOUNT", command=account_flow, bootstyle="success", width=30).pack(pady=10, ipady=5)
         
-        tk.Label(scrollable_content, text=f"Machine ID: {self.get_machine_id()}", font=("Consolas", 8), bg="#2c3e50", fg="grey").pack(side="bottom", pady=10)
+        tk.Label(pop, text=f"Machine ID: {self.get_machine_id()}", font=("Consolas", 8), bg="#2c3e50", fg="grey").pack(side="bottom", pady=10)
 
     def show_verification_step1(self):
         """Step 1: Admin Secret Key"""
@@ -895,65 +911,6 @@ class QuotationApp:
         btn_save.bind("<Enter>", on_enter)
         btn_save.bind("<Leave>", on_leave)
 
-    # =========================================================================
-    # DATABASE METHODS
-    # =========================================================================
-    # def init_database(self):
-    #     self.current_username = "admin"
-    #     server_name = r'.\SQLEXPRESS'
-    #     database_name = 'QuotationDB'
-    #     try:
-    #         conn_str = (f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server_name};DATABASE={database_name};Trusted_Connection=yes;TrustServerCertificate=yes;')
-    #         self.conn = pyodbc.connect(conn_str)
-    #         self.cursor = self.conn.cursor()
-            
-    #         # Tables Creation (Jo pehle tha waisa hi rahega)
-    #         tables = [
-    #             "quotations", "tax_invoices", "commercial_invoices", "delivery_challans"
-    #         ]
-            
-    #         # --- MAGIC FIX: "created_by" column add karna ---
-    #         for tbl in tables:
-    #             # Table banao agar nahi hai
-    #             self.cursor.execute(f"""
-    #                 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='{tbl}' AND xtype='U')
-    #                 CREATE TABLE {tbl} (
-    #                     id INT IDENTITY(1,1) PRIMARY KEY,
-    #                     ref_no NVARCHAR(50),
-    #                     client_name NVARCHAR(255),
-    #                     date NVARCHAR(50),
-    #                     grand_total FLOAT,
-    #                     full_data NVARCHAR(MAX),
-    #                     created_by NVARCHAR(50) DEFAULT 'admin'  -- <--- YE NAYA COLUMN HAI
-    #                 )
-    #             """)
-                
-    #             # Agar table pehle se bana hai, to check karo 'created_by' column hai ya nahi
-    #             try:
-    #                 self.cursor.execute(f"SELECT created_by FROM {tbl} WHERE 1=0")
-    #             except:
-    #                 # Column nahi mila, to add kar do
-    #                 self.conn.commit() # Transaction clear
-    #                 print(f"Adding 'created_by' column to {tbl}...")
-    #                 self.cursor.execute(f"ALTER TABLE {tbl} ADD created_by NVARCHAR(50) DEFAULT 'admin'")
-    #                 self.conn.commit()
-
-    #         # Users Table
-    #         self.cursor.execute("""
-    #             IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
-    #             CREATE TABLE users (
-    #                 id INT IDENTITY(1,1) PRIMARY KEY,
-    #                 full_name NVARCHAR(100),
-    #                 username NVARCHAR(50) UNIQUE,
-    #                 password NVARCHAR(100),
-    #                 is_premium INT DEFAULT 0
-    #             )
-    #         """)
-    #         self.conn.commit()
-    #         print(" Database Connected & Updated for Multi-User!")
-            
-    #     except Exception as e:
-    #         messagebox.showerror("Database Error", f"SQL Server Connection Failed:\n{e}")
     def init_database(self):
         # ✅ Ab ye line sahi se indent hai
         if hasattr(self, 'conn') and self.conn:
@@ -1199,16 +1156,16 @@ class QuotationApp:
         # 1. Validation: Client Name required (Accessing StringVars is usually thread-thread safe in Tkinter if it was created in main thread, but safer to check winfo_exists)
         try:
             client_name = self.client_name_var.get().strip()
-        except: return 
+        except: return False
         
         if not client_name:
             if not silent: messagebox.showwarning("Error", "Client Name is required!", parent=self.root)
-            return
+            return False
 
         # 2. Validation: Kam se kam ek item hona chahiye taake blank records na banen
         if not self.items_data:
             if not silent: messagebox.showwarning("Empty Quotation", "Please add at least one item before saving (Total Revenue must be greater than 0).", parent=self.root)
-            return
+            return False
 
         # Data Pack karna
         data_packet = {
@@ -1271,7 +1228,7 @@ class QuotationApp:
                 if already_exists:
                     if not silent: 
                         messagebox.showerror("Duplicate Error", f"Quotation No '{self.quotation_no_var.get()}' Already saved!\n\nDelete the number or edit the previous entry.")
-                    return # Save cancel kar dein
+                    return False
 
                 # Agar duplicate nahi hai, to Insert karein
                 self.cursor.execute("""
@@ -1283,6 +1240,7 @@ class QuotationApp:
                 print(f"New ID Assigned: {self.current_db_id}")
 
             self.conn.commit()
+            self.is_saved = True
             
             if not silent:
                 # Show Remaining Trial Info in Toast if applicable
@@ -1299,9 +1257,11 @@ class QuotationApp:
                     position=(50, 50, 'ne')
                 )
                 toast.show_toast()
+            return True
 
         except Exception as e:
             if not silent: messagebox.showerror("DB Error", f"Database error: {str(e)}")
+            return False
 
     def update_app_theme(self, event=None):
         """
@@ -1368,10 +1328,36 @@ class QuotationApp:
     def load_history_window(self):
         # --- 1. WINDOW SETUP ---
         win = tk.Toplevel(self.root)
-        win.title("Quotation History & Manager")
-        win.geometry("1250x700")
+        win.title("Unified Document History Manager")
+        win.geometry("1100x700")
         win.transient(self.root)
-        win.grab_set()
+        
+        # --- TOP CONTROLS ---
+        top_fr = ttk.Frame(win, padding=10)
+        top_fr.pack(fill='x')
+
+        ttk.Label(top_fr, text="Select Document Type:", font=("bold", 10)).pack(side='left', padx=(0, 10))
+        
+        doc_type_var = tk.StringVar(value="Quotations")
+        doc_map = {
+            "Quotations": "quotations",
+            "Tax Invoices": "tax_invoices", 
+            "Commercial Invoices": "commercial_invoices",
+            "Delivery Challans": "delivery_challans"
+        }
+        db_map = {
+            "quotations": "QuotationManager_Final.db",
+            "tax_invoices": "TaxInvoice_Manager.db",
+            "commercial_invoices": "CommercialInvoice_Manager.db",
+            "delivery_challans": "DeliveryChallan_Manager.db"
+        }
+        
+        cb = ttk.Combobox(top_fr, textvariable=doc_type_var, values=list(doc_map.keys()), state="readonly", width=25)
+        cb.pack(side='left')
+        
+        search_var = tk.StringVar()
+        ttk.Label(top_fr, text="Search Client/Ref:", font=("bold", 10)).pack(side='left', padx=(20, 10))
+        ttk.Entry(top_fr, textvariable=search_var, width=20).pack(side='left')
 
         # --- 2. TREEVIEW SETUP ---
         cols = ("chk", "ID", "Ref No", "Client", "Date", "Amount")
@@ -1379,9 +1365,9 @@ class QuotationApp:
         
         tree.heading("chk", text="✔");       tree.column("chk", width=40, anchor="center")
         tree.heading("ID", text="ID");       tree.column("ID", width=60, anchor="center")
-        tree.heading("Ref No", text="Ref No"); tree.column("Ref No", width=120)
-        tree.heading("Client", text="Client Name"); tree.column("Client", width=300)
-        tree.heading("Date", text="Date");   tree.column("Date", width=100)
+        tree.heading("Ref No", text="Ref No"); tree.column("Ref No", width=150)
+        tree.heading("Client", text="Client Name"); tree.column("Client", width=350)
+        tree.heading("Date", text="Date");   tree.column("Date", width=120)
         tree.heading("Amount", text="Total"); tree.column("Amount", width=120)
         
         sb = ttk.Scrollbar(win, orient="vertical", command=tree.yview)
@@ -1395,19 +1381,50 @@ class QuotationApp:
             if not sel: return None
             vals = tree.item(sel[0])['values']
             try:
-                clean = ''.join(filter(str.isdigit, str(vals[1])))
-                return int(clean) if clean else None
+                # Clean ID column logic
+                raw = str(vals[1])
+                return int(''.join(filter(str.isdigit, raw)))
             except: return None
 
-        def refresh_list():
+        def refresh_list(event=None):
+            # Clear Tree
             for i in tree.get_children(): tree.delete(i)
+            
+            tbl = doc_map.get(doc_type_var.get(), "quotations")
+            search = search_var.get().strip().lower()
+            
+            db_file = db_map.get(tbl, "QuotationManager_Final.db")
+            
             try:
-                self.cursor.execute("SELECT id, ref_no, client_name, date, grand_total FROM quotations ORDER BY id DESC")
-                rows = self.cursor.fetchall()
+                # Dynamic SQLite connection to correct decoupled file!
+                conn = sqlite3.connect(db_file)
+                cur = conn.cursor()
+                
+                # Check columns existence (Safe-guard)
+                query = f"SELECT id, ref_no, client_name, date, grand_total FROM {tbl} ORDER BY id DESC"
+                
+                cur.execute(query)
+                rows = cur.fetchall()
+                conn.close()
+                
                 for row in rows:
-                    tree.insert("", "end", values=("☐", row[0], row[1], row[2], row[3], row[4]))
+                    r_id, r_ref, r_cli, r_date, r_amt = row
+                    
+                    # Search Filter
+                    if search:
+                        txt = f"{r_ref} {r_cli}".lower()
+                        if search not in txt: continue
+
+                    tree.insert("", "end", values=("☐", r_id, r_ref, r_cli, r_date, r_amt))
             except Exception as e:
-                messagebox.showerror("History Error", f"Could not load data:\n{e}")
+                pass 
+
+        # Bind events
+        cb.bind("<<ComboboxSelected>>", refresh_list)
+        search_var.trace("w", lambda *a: refresh_list())
+        
+        # Initial Load
+        refresh_list()
 
         def on_click(event):
             region = tree.identify("region", event.x, event.y)
@@ -1420,173 +1437,175 @@ class QuotationApp:
                     tree.item(row_id, values=(new_mark,) + tuple(vals[1:]))
         tree.bind("<Button-1>", on_click)
 
-        # --- 4. ACTION: LOAD QUOTATION (CRITICAL FIX HERE) ---
-        def load_quotation(event=None):
+        # --- 4. ACTION: LOAD DOCUMENT ---
+        def load_document(event=None):
             db_id = get_selected_db_id()
             if not db_id: 
-                messagebox.showwarning("Load", "Please select a quotation first.")
+                messagebox.showwarning("Load", "Please select a document first.", parent=win)
                 return
 
-            try:
-                self.cursor.execute("SELECT full_data FROM quotations WHERE id=?", (db_id,))
-                row = self.cursor.fetchone()
-                if row:
-                    win.destroy()
- 
-                    # CRITICAL: Rebuild UI if it was destroyed by dashboard
-                    if not hasattr(self, 'tree') or not self.tree.winfo_exists():
-                        # Clear any dashboard remnants
-                        for widget in self.root.winfo_children():
-                            try: widget.destroy()
-                            except: pass
-                        
-                        # Rebuild the main quotation UI
-                        self._build_scrollable_gui()
-                        self.root.update_idletasks()
-
-                    if self.current_dashboard:
-                        try:
-                            # Koshish karein destroy karne ki
-                            if hasattr(self.current_dashboard, 'destroy'):
-                                self.current_dashboard.destroy()
-                            elif hasattr(self.current_dashboard, 'frame'):
-                                self.current_dashboard.frame.destroy()
-                        except: pass
-                        self.current_dashboard = None
-
-                    # 3. Data Load Karein
-                    print(f"Loading ID: {db_id}")
-                    self.restore_data(row[0])
-                    self.current_db_id = db_id
-                    
-                    # 4. Main Window ko Upar Layen
-                    self.root.deiconify() # Agar minimize thi to restore karein
-                    self.root.lift()      # Screen ke sab se upar layen
-                    self.root.title(f"Quotation Generator - [Loaded ID: {db_id}]")
-                    self.root.update()    # Screen Refresh Force Karein
-                    
-                    messagebox.showinfo("Success", "Quotation Loaded Successfully!")
-                else:
-                    messagebox.showerror("Error", "Data not found in DB.")
-            except Exception as e:
-                messagebox.showerror("Load Error", f"Failed:\n{e}")
-
-
-        def rename_record():
-            sel = tree.selection()
-            if not sel:
-                messagebox.showwarning("Rename", "Please select a row first.")
-                return
+            tbl = doc_map.get(doc_type_var.get(), "quotations")
+            db_file = db_map.get(tbl, "QuotationManager_Final.db")
             
-            db_id = get_selected_db_id()
-            current_ref = tree.item(sel[0])['values'][2]
-
-            new_name = simpledialog.askstring("Rename", "Enter New Ref No:", initialvalue=current_ref, parent=win)
-            if new_name and db_id:
-                try:
-                    self.cursor.execute("UPDATE quotations SET ref_no=? WHERE id=?", (new_name, db_id))
-                    
-                    # Update JSON inside DB too
-                    self.cursor.execute("SELECT full_data FROM quotations WHERE id=?", (db_id,))
-                    row = self.cursor.fetchone()
-                    if row:
-                        import json
-                        d = json.loads(row[0])
-                        d['header']['quot_no'] = new_name
-                        self.cursor.execute("UPDATE quotations SET full_data=? WHERE id=?", (json.dumps(d), db_id))
-                    
-                    self.conn.commit()
-                    
-                    # Update List
-                    vals = list(tree.item(sel[0])['values'])
-                    vals[2] = new_name
-                    tree.item(sel[0], values=vals)
-                    messagebox.showinfo("Success", "Renamed!")
-                except Exception as e:
-                    messagebox.showerror("Error", str(e))
-
-        # --- 6. ACTION: CONVERT & DELETE ---
-        def run_conversion(module_name, class_name, parent_win):
-            db_id = get_selected_db_id()
-            if not db_id:
-                messagebox.showwarning("Convert", "Select a quotation.")
-                return
             try:
-                self.cursor.execute("SELECT full_data FROM quotations WHERE id=?", (db_id,))
-                row = self.cursor.fetchone()
-                if row:
-                    parent_win.grab_release() 
-                    parent_win.destroy()      
-                    
-                    def start_new_module():
-                        import importlib
-                        mod = importlib.import_module(module_name)
-                        app_class = getattr(mod, class_name)
-                        
-                        new_win = tk.Toplevel(self.root)
-                        app_instance = app_class(new_win, from_quotation_data=row[0])
-                        new_win.state('zoomed')
-                        new_win.lift()
-                        new_win.focus_force()
-                        new_win.attributes('-topmost', True)
-                        new_win.after(1000, lambda: new_win.attributes('-topmost', False))
-                    
-                    # Run after 200ms to let history window clear completely
-                    self.root.after(200, start_new_module)
+                conn = sqlite3.connect(db_file)
+                cur = conn.cursor()
+                cur.execute(f"SELECT full_data FROM {tbl} WHERE id=?", (db_id,))
+                row = cur.fetchone()
+                conn.close()
+                
+                if not row:
+                    messagebox.showerror("Error", "Data not found in DB.", parent=win)
+                    return
+                
+                json_data = row[0]
+                win.destroy()
+                
+                self.launch_document_editor(tbl, json_data, db_id)
+
             except Exception as e:
-                messagebox.showerror("Error", str(e))
+                messagebox.showerror("Load Error", f"Failed:\n{e}", parent=win)
         
+        tree.bind("<Double-1>", load_document)
 
 
-        # Button callback functions
-        def to_tax(): run_conversion("invoice", "InvoiceApp", win)
-        def to_comm(): run_conversion("commercial", "CommercialApp", win)
-        def to_dc(): run_conversion("delivery_challan", "DeliveryChallanApp", win)
 
         def delete_selected():
             targets = [c for c in tree.get_children() if str(tree.item(c)['values'][0]) == "☑"]
             if not targets and tree.selection(): targets.append(tree.selection()[0])
             
             if not targets:
-                messagebox.showwarning("Delete", "Select items to delete.")
+                messagebox.showwarning("Delete", "Select items to delete.", parent=win)
                 return
 
-            if not messagebox.askyesno("Confirm", f"Delete {len(targets)} items?"): return
+            if not messagebox.askyesno("Confirm", f"Delete {len(targets)} records?", parent=win): return
 
-            count = 0
-            for item in targets:
-                try:
+            tbl = doc_map.get(doc_type_var.get(), "quotations")
+            db_file = db_map.get(tbl, "QuotationManager_Final.db")
+            
+            try:
+                ids_to_del = []
+                for item in targets:
                     vals = tree.item(item)['values']
-                    clean = ''.join(filter(str.isdigit, str(vals[1])))
-                    if clean:
-                        self.cursor.execute("DELETE FROM quotations WHERE id=?", (int(clean),))
-                        tree.delete(item)
-                        count += 1
+                    ids_to_del.append(vals[1]) 
+                
+                if ids_to_del:
+                    conn = sqlite3.connect(db_file)
+                    cur = conn.cursor()
+                    placeholders = ','.join('?' for _ in ids_to_del)
+                    cur.execute(f"DELETE FROM {tbl} WHERE id IN ({placeholders})", ids_to_del)
+                    conn.commit()
+                    conn.close()
+                    refresh_list()
+                    messagebox.showinfo("Success", "Records Deleted.", parent=win)
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=win)
+
+        # Action Buttons
+        btn_box = ttk.Frame(win, padding=10)
+        btn_box.pack(fill='x', side='bottom')
+
+        ttk.Button(btn_box, text="📂 OPEN / EDIT", bootstyle="success", command=load_document).pack(side='left', padx=5)
+        ttk.Button(btn_box, text="🗑 DELETE SELECTED", bootstyle="danger", command=delete_selected).pack(side='right', padx=5)
+        ttk.Button(btn_box, text="🔄 Refresh", bootstyle="info-outline", command=refresh_list).pack(side='right', padx=5)
+
+    def _get_next_ref(self, table, prefix=""):
+        """Smarter Ref No Generator: Suggests next number based on DB records"""
+        try:
+            if not hasattr(self, 'cursor'): return f"{prefix}1"
+            self.cursor.execute(f"SELECT ref_no FROM {table} ORDER BY id DESC LIMIT 50")
+            rows = self.cursor.fetchall()
+            
+            import re
+            max_num = 0
+            for row in rows:
+                # Find all numbers in the string
+                nums = re.findall(r'\d+', str(row[0]))
+                if nums:
+                    val = int(nums[-1]) 
+                    if val > max_num: max_num = val
+            
+            if max_num == 0: return f"{prefix}1"
+            return f"{prefix}{max_num + 1}"
+        except Exception as e:
+            print(f"Ref Suggest Error: {e}")
+            return f"{prefix}1"
+
+    def launch_document_editor(self, table_name, json_data, db_id):
+        """Intelligent Launcher: Opens the correct App window based on table type."""
+        
+        def launch(app_class, title_prefix):
+            # 1. Close current Dashboard if active
+            if self.current_dashboard:
+                try: 
+                    self.current_dashboard.frame.destroy()
+                    self.current_dashboard = None
                 except: pass
-            self.conn.commit()
-            if count: messagebox.showinfo("Success", f"Deleted {count} items.")
+            
+            # 2. Check if we are already in a Toplevel (if called from history window of another app)
+            # Strategy: Always create a new Window for the editor
+            new_win = tk.Toplevel(self.root)
+            
+            # 3. Initialize App with Data
+            # Note: We pass from_quotation_data which calls restore_data internaly
+            app_instance = app_class(new_win, from_quotation_data=json_data)
+            app_instance.current_db_id = db_id
+            
+            new_win.title(f"{title_prefix} - [ID: {db_id}]")
+            new_win.state('zoomed')
+            new_win.lift()
+            new_win.focus_force()
+        
+        try:
+            if table_name == "quotations":
+                # For Quotations, we prefer using the Main Window if possible, or new Toplevel
+                # Reusing Main Window to avoid multiple instances logic complexity
+                
+                # Close Dashboard
+                if self.current_dashboard:
+                    try: self.current_dashboard.frame.destroy()
+                    except: pass
+                    self.current_dashboard = None
+                
+                # Clean Root
+                for widget in self.root.winfo_children():
+                    if isinstance(widget, tk.Toplevel): continue
+                    try: widget.destroy()
+                    except: pass
+                
+                # Rebuild Main GUI
+                self._build_scrollable_gui()
+                self.root.deiconify()
+                
+                # Load Data
+                self.restore_data(json_data)
+                self.current_db_id = db_id
+                self.root.title(f"Quotation - [ID: {db_id}]")
+                
+            elif table_name == "tax_invoices":
+                from invoice import InvoiceApp
+                launch(InvoiceApp, "Tax Invoice")
+            
+            elif table_name == "commercial_invoices":
+                from commercial import CommercialApp
+                launch(CommercialApp, "Commercial Invoice")
+                
+            elif table_name == "delivery_challans":
+                from delivery_challan import DeliveryChallanApp
+                launch(DeliveryChallanApp, "Delivery Challan")
 
-        # --- 7. BUTTON LAYOUT ---
-        act_frame = ttk.LabelFrame(win, text="Create Documents")
-        act_frame.pack(fill='x', padx=10, pady=5)
-        ttk.Button(act_frame, text="📑 SalesTax Invoice", command=to_tax).pack(side='left', padx=5, pady=5, expand=True, fill='x')
-        ttk.Button(act_frame, text="📄 Commercial Inv", command=to_comm).pack(side='left', padx=5, pady=5, expand=True, fill='x')
-        ttk.Button(act_frame, text="🚚 Delivery Challan", command=to_dc).pack(side='left', padx=5, pady=5, expand=True, fill='x')
+        except Exception as e:
+            messagebox.showerror("Launch Error", f"Could not launch editor:\n{e}")
 
-        mng_frame = ttk.Frame(win)
-        mng_frame.pack(fill='x', padx=10, pady=10)
+    # =========================================================
+    #  GENERIC IMPORT / LOAD METHODS 
+    # =========================================================
+    def open_import_dialog(self, table_name):
+        # Legacy support or quick import
+        self.load_history_window()
 
-        # Load & Rename
-        ttk.Button(mng_frame, text="📂 Load Quotation", command=load_quotation).pack(side='left', padx=5)
-        ttk.Button(mng_frame, text="✏ Rename", command=rename_record).pack(side='left', padx=5)
-
-        # Delete & Refresh
-        del_btn = tk.Button(mng_frame, text="🗑 Delete Checked", bg="#ffcccc", fg="red", font=("Arial", 10, "bold"), command=delete_selected)
-        del_btn.pack(side='right', padx=5)
-        ttk.Button(mng_frame, text="🔄 Refresh List", command=refresh_list).pack(side='right', padx=5)
-
-        tree.bind("<Double-1>", load_quotation)
-        refresh_list()
+    def load_invoice_by_id(self, table_name, db_id):
+        pass
 
     
         # def refresh_list():
@@ -1652,7 +1671,9 @@ class QuotationApp:
             
             # 1. Restore Headers
             h = data.get("header", {})
-            self.quotation_no_var.set(h.get("quot_no", ""))
+            # Smart Ref No Loading
+            doc_ref = h.get("quot_no") or h.get("ref_no") or h.get("inv_no") or ""
+            self.quotation_no_var.set(doc_ref)
             self.client_name_var.set(h.get("client_name", ""))
             self.doc_date_var.set(h.get("date", ""))
             self.doc_validity_var.set(h.get("validity", ""))
@@ -2341,7 +2362,8 @@ class QuotationApp:
         def _close():
             self.refresh_custom_header_ui()
             mgr.destroy()
-
+            
+        mgr.protocol("WM_DELETE_WINDOW", _close)
         ttk.Button(btn_fr, text="Done / Close", command=_close).pack(side='right')
 
         self.refresh_header_mgr()
@@ -2488,65 +2510,6 @@ class QuotationApp:
         if messagebox.askyesno("Confirm", f"Delete column '{self.columns_config[idx]['label']}'?", parent=self.col_win):
             del self.columns_config[idx]
             self.open_column_manager() # Window refresh karein
-        
-        def _refresh():
-            for i in tv.get_children(): tv.delete(i)
-            for idx, c in enumerate(self.columns_config):
-                prt = "Yes" if c.get('printable', True) else "No"
-                tv.insert("", "end", iid=str(idx), values=(c['label'], c['width'], c['type'], prt, c['id']))
-        _refresh()
-        
-        # --- DRAG & DROP LOGIC ---
-        def b_down(event):
-            tv = event.widget
-            if tv.identify_row(event.y) not in tv.get_children(): return
-            tv.selection_set(tv.identify_row(event.y))
-            
-        def b_up(event):
-            tv = event.widget
-            moveto = tv.identify_row(event.y)
-            dragged = tv.selection()
-            if not dragged: return 
-            
-            dragged_idx = int(dragged[0])
-            
-            if moveto:
-                 target_idx = int(moveto)
-                 if target_idx != dragged_idx:
-                     # Move element in config
-                     item = self.columns_config.pop(dragged_idx)
-                     self.columns_config.insert(target_idx, item)
-                     _refresh()
-                     tv.selection_set(str(target_idx))
-
-        tv.bind("<ButtonPress-1>", b_down)
-        tv.bind("<ButtonRelease-1>", b_up)
-
-        # Tools
-        btn_fr = ttk.Frame(win)
-        btn_fr.pack(fill='x', pady=10)
-        
-        def _add(): self._edit_col_dialog(None, _refresh, win)
-        def _edit():
-            sel = tv.selection()
-            if not sel: return
-            idx = int(sel[0])
-            self._edit_col_dialog(self.columns_config[idx], _refresh, win)
-        def _delete():
-            sel = tv.selection()
-            if not sel: return
-            idx = int(sel[0])
-            c = self.columns_config[idx]
-            if messagebox.askyesno("Confirm Delete", f"Delete column '{c['label']}'?"):
-                del self.columns_config[idx]; _refresh()
-
-        ttk.Button(btn_fr, text="Note: Drag rows to reorder", state="disabled").pack(side='left')
-        ttk.Separator(btn_fr, orient='vertical').pack(side='left', padx=10, fill='y')
-        ttk.Button(btn_fr, text="✏ Edit/Rename", command=_edit).pack(side='left', padx=2)
-        ttk.Button(btn_fr, text="+ Add New", command=_add).pack(side='left', padx=2)
-        ttk.Button(btn_fr, text="🗑 Delete", command=_delete).pack(side='left', padx=10)
-        
-        ttk.Button(win, text="Save Actions & Close", style="Action.TButton", command=lambda: [self.refresh_items_ui_structure(), win.destroy()]).pack(pady=10)
 
     def _edit_col_dialog(self, col_data, callback_fn, parent):
         d = tk.Toplevel(parent)
@@ -2869,8 +2832,32 @@ class QuotationApp:
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.pack(side='top', fill='both', expand=True)
+        
+        # Pack Scrollbar and Treeview side-by-side to restore proper scrolling!
+        vsb.pack(side='right', fill='y')
+        self.tree.pack(side='left', fill='both', expand=True)
+        
         self.tree.bind("<Double-1>", self.on_tree_double_click)
+        
+        # --- Right-Click Context Menu for Premium Row Insertion/Navigation ---
+        self.context_menu = tk.Menu(self.tree, tearoff=0)
+        self.context_menu.add_command(label="➕ Insert Row Above", command=self.insert_row_above)
+        self.context_menu.add_command(label="➕ Insert Row Below", command=self.insert_row_below)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="✎ Edit Selected Item", command=self.load_row_for_edit)
+        self.context_menu.add_command(label="❌ Delete Selected Item", command=self.delete_row)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="⬆ Move Up", command=lambda: self.move_row(-1))
+        self.context_menu.add_command(label="⬇ Move Down", command=lambda: self.move_row(1))
+        
+        def show_context_menu(event):
+            # Select row at right click location
+            row_id = self.tree.identify_row(event.y)
+            if row_id:
+                self.tree.selection_set(row_id)
+                self.context_menu.post(event.x_root, event.y_root)
+        
+        self.tree.bind("<Button-3>", show_context_menu)
 
     def add_or_update_item(self):
         if self.editing_index is not None: self._update_existing_item()
@@ -2957,6 +2944,7 @@ class QuotationApp:
         self.refresh_tree()
         self.clear_inputs()
         self.recalc_all()
+        self.mark_unsaved()
 
     def _update_existing_item(self):
         if self.editing_index is None: return
@@ -2969,6 +2957,7 @@ class QuotationApp:
         self.refresh_tree()
         self.clear_inputs()
         self.recalc_all()
+        self.mark_unsaved()
 
     def load_row_for_edit(self):
         sel = self.tree.selection()
@@ -3056,10 +3045,129 @@ class QuotationApp:
         self.refresh_tree()
         self.recalc_all()
         
-        # 6. Cleanup backup
         self.last_deleted_item = None
         messagebox.showinfo("Success", "Successfully get the deleted item!")
-         
+        self.mark_unsaved()
+
+    def mark_unsaved(self, event=None):
+        self.is_saved = False
+
+    def confirm_and_save_before_closing(self):
+        """
+        Prompts the user to save changes if there are unsaved changes.
+        Returns True if proceeding to close, False to abort.
+        """
+        has_client = False
+        try:
+            if hasattr(self, 'client_name_var') and self.client_name_var.get().strip():
+                has_client = True
+        except: pass
+        
+        has_items = False
+        try:
+            if hasattr(self, 'items_data') and self.items_data:
+                has_items = True
+        except: pass
+        
+        if not (has_client or has_items):
+            return True # Empty document, okay to close
+            
+        is_saved = getattr(self, 'is_saved', True)
+        
+        if not is_saved:
+            ans = messagebox.askyesnocancel(
+                "Unsaved Changes",
+                "You have unsaved changes. Would you like to save this document before leaving?",
+                parent=self.root
+            )
+            if ans is True: # Yes, save and close
+                success = self.save_to_database()
+                if success is False: # Save failed/aborted
+                    return False
+                return True
+            elif ans is False: # No, close without saving
+                return True
+            else: # Cancel, abort closing
+                return False
+        return True
+
+    def insert_row_above(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Insert", "Please select a row in the table first to insert above it!")
+            return
+        idx = self.tree.get_children().index(sel[0])
+        
+        # Create a new blank item
+        new_item = {}
+        for col in self.columns_config:
+            if col['type'] == 'number':
+                new_item[col['id']] = 0.0
+            elif col['type'] == 'text':
+                new_item[col['id']] = ""
+            elif col['id'] == 'sno':
+                new_item['sno'] = idx + 1
+        
+        # Insert into self.items_data at idx
+        self.items_data.insert(idx, new_item)
+        
+        # Shift colors
+        new_colors = {}
+        for k, v in self.row_colors.items():
+            if k < idx:
+                new_colors[k] = v
+            else:
+                new_colors[k + 1] = v
+        self.row_colors = new_colors
+
+        self.refresh_tree()
+        self.recalc_all()
+        
+        # Set selection on newly inserted row
+        children = self.tree.get_children()
+        if idx < len(children):
+            self.tree.selection_set(children[idx])
+            self.load_row_for_edit()
+
+    def insert_row_below(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Insert", "Please select a row in the table first to insert below it!")
+            return
+        idx = self.tree.get_children().index(sel[0])
+        target_idx = idx + 1
+        
+        # Create a new blank item
+        new_item = {}
+        for col in self.columns_config:
+            if col['type'] == 'number':
+                new_item[col['id']] = 0.0
+            elif col['type'] == 'text':
+                new_item[col['id']] = ""
+            elif col['id'] == 'sno':
+                new_item['sno'] = target_idx + 1
+        
+        # Insert into self.items_data at target_idx
+        self.items_data.insert(target_idx, new_item)
+        
+        # Shift colors
+        new_colors = {}
+        for k, v in self.row_colors.items():
+            if k <= idx:
+                new_colors[k] = v
+            else:
+                new_colors[k + 1] = v
+        self.row_colors = new_colors
+
+        self.refresh_tree()
+        self.recalc_all()
+        
+        # Set selection on newly inserted row
+        children = self.tree.get_children()
+        if target_idx < len(children):
+            self.tree.selection_set(children[target_idx])
+            self.load_row_for_edit()
+
     # =========================================================================
     # UTILITY & HELPER METHODS
     # =========================================================================
@@ -3437,6 +3545,10 @@ class QuotationApp:
     # DOCUMENT GENERATION
     # =========================================================================
     def on_preview_click(self):
+        if getattr(self, 'is_generating_pdf', False):
+            return
+        self.is_generating_pdf = True
+        
         # 1. Show "Please Wait" to avoid "Not Responding"
         wait = tk.Toplevel(self.root)
         wait.title("Please Wait")
@@ -3470,52 +3582,60 @@ class QuotationApp:
                 os.close(fd) 
                 
                 # PDF Generate
-                self._generate_pdf(tmp_path, terms)
+                self._generate_pdf(tmp_path, terms, ui_data_payload=None)
                 
                 # Successful: Open and Confirm
                 self.root.after(0, lambda: self._show_preview_confirm(tmp_path, wait))
             except Exception as e:
                 err_msg = str(e)
-                self.root.after(0, lambda m=err_msg: [wait.destroy(), messagebox.showerror("Preview Error", f"Could not generate preview.\nDetails: {m}")])
+                self.root.after(0, lambda m=err_msg: [
+                    wait.destroy(), 
+                    setattr(self, 'is_generating_pdf', False),
+                    messagebox.showerror("Preview Error", f"Could not generate preview.\nDetails: {m}")
+                ])
 
         import threading
         threading.Thread(target=worker, args=(tagged_terms,), daemon=True).start()
 
     def _show_preview_confirm(self, tmp_path, wait_win):
-        # 3. Open PDF
+        self.is_generating_pdf = False
         try:
-            if os.path.exists(tmp_path):
-                if os.name == 'nt':  # Windows
-                    os.startfile(tmp_path)
-                else:  # Mac/Linux
-                    webbrowser.open("file://" + tmp_path)
-            else:
+            if wait_win and wait_win.winfo_exists():
                 wait_win.destroy()
-                messagebox.showerror("Error", "Preview file could not be created.")
-                return
-        except Exception as e:
-            wait_win.destroy()
-            messagebox.showerror("Error", f"Could not open PDF: {e}")
-            return
+        except: pass
 
-        wait_win.destroy()
+        # 4. Open PDF 
+        def open_pdf_logic():
+            try:
+                if os.path.exists(tmp_path):
+                    if os.name == 'nt':  # Windows
+                        os.startfile(tmp_path)
+                    else:  # Mac/Linux
+                        import webbrowser
+                        webbrowser.open("file://" + tmp_path)
+                else:
+                    messagebox.showerror("Error", "Preview file could not be created.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not open PDF: {e}")
 
-        # 4. Confirmation Popup
+        # Start PDF immediately
+        open_pdf_logic()
+
+        # 5. Confirmation Popup (Delay slightly to ensure it stays on top of app)
         top = tk.Toplevel(self.root)
         top.title("Confirm Preview")
-        top.geometry("450x350")
+        top.geometry("450x380")
         top.transient(self.root)
-        top.lift()
-        top.focus_force()
-        # ✅ FIX: Don't use grab_set - it blocks the UI
-        # top.grab_set()
         
         # Center confirm window
         root_x = self.root.winfo_x()
         root_y = self.root.winfo_y()
         root_w = self.root.winfo_width()
         root_h = self.root.winfo_height()
-        top.geometry(f"+{root_x + (root_w//2) - 225}+{root_y + (root_h//2) - 175}")
+        top.geometry(f"+{root_x + (root_w//2) - 225}+{root_y + (root_h//2) - 190}")
+        
+        top.lift()
+        top.focus_force()
 
         ttk.Label(top, text="Check the opened PDF Layout.", font=('Segoe UI', 12, 'bold')).pack(pady=15)
         ttk.Label(top, text="If it looks good, choose a format to save:", foreground="grey").pack(pady=(0,15))
@@ -3525,7 +3645,7 @@ class QuotationApp:
         
         ttk.Button(btn_fr, text="✅ Approve & Save as PDF", command=lambda: self._finish_save(top, "pdf"), bootstyle="success").pack(fill='x', pady=7, ipady=5)
         ttk.Button(btn_fr, text="📄 Approve & Save as DOCX", command=lambda: self._finish_save(top, "docx"), bootstyle="info").pack(fill='x', pady=7, ipady=5)
-        ttk.Button(btn_fr, text="📊 Approve & Save as Excel", command=lambda: self._finish_save(top, "xlsx"), bootstyle="secondary").pack(fill='x', pady=7, ipady=5)
+        ttk.Button(btn_fr, text="📊 Approve & Save as Excel", command=lambda: self._finish_save(top, "excel"), bootstyle="secondary").pack(fill='x', pady=7, ipady=5)
         
         ttk.Separator(btn_fr, orient='horizontal').pack(fill='x', pady=15)
         ttk.Button(btn_fr, text="❌ Cancel / Edit More", command=top.destroy, bootstyle="danger-outline").pack(fill='x', pady=5)
@@ -3572,7 +3692,7 @@ class QuotationApp:
             print(f"QR Code generation error: {e}")
             return None
 
-    def _generate_pdf(self, path, pre_fetched_terms=None):
+    def _generate_pdf(self, path, pre_fetched_terms=None, ui_data_payload=None):
         from reportlab.platypus import KeepTogether # Block protection ke liye
 
         # 1. SETUP
@@ -3970,7 +4090,41 @@ class QuotationApp:
                     else:
                         row_cells[i].text = str(val)
             
-            doc.add_paragraph(self.total_lbl.cget("text")).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            # --- FINANCIAL SUMMARY ---
+            # Create a table aligned right for totals
+            t_sum = doc.add_table(rows=0, cols=2)
+            t_sum.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            
+            curr = self.currency_symbol_var.get()
+
+            if self.print_subtotal_var.get():
+                r = t_sum.add_row()
+                r.cells[0].text = "Total Amount (Excl. Tax):"
+                r.cells[0].paragraphs[0].runs[0].bold = True
+                r.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                r.cells[1].text = f"{curr} {self.subtotal_var.get()}"
+                r.cells[1].paragraphs[0].runs[0].bold = True
+                r.cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+            if self.print_tax_var.get():
+                r = t_sum.add_row()
+                r.cells[0].text = "Total Sales Tax:"
+                r.cells[0].paragraphs[0].runs[0].bold = True
+                r.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                r.cells[1].text = f"{curr} {self.tax_total_var.get()}"
+                r.cells[1].paragraphs[0].runs[0].bold = True
+                r.cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+            if self.print_grand_total_var.get():
+                r = t_sum.add_row()
+                r.cells[0].text = "Grand Total:"
+                r.cells[0].paragraphs[0].runs[0].bold = True
+                r.cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                r.cells[1].text = f"{curr} {self.grand_total_var.get()}"
+                r.cells[1].paragraphs[0].runs[0].bold = True
+                r.cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            
+            doc.add_paragraph("")
             doc.add_paragraph("")
             
             # --- Formatted Terms (Word Parser with custom spacing) ---
@@ -4028,19 +4182,44 @@ class QuotationApp:
 
             # Signature Section
             doc.add_paragraph(""); doc.add_paragraph("")
-            t_sig = doc.add_table(rows=1, cols=2)
-            t_sig.width = Inches(CW_INCH); t_sig.autofit = False
-            t_sig.columns[0].width = Inches(CW_INCH*0.5); t_sig.columns[1].width = Inches(CW_INCH*0.5)
+            # Signature Section
+            doc.add_paragraph(""); doc.add_paragraph("")
             
+            # Identify if regular quotation
+            is_quotation = self.__class__.__name__ == "QuotationApp"
+            
+            t_sig = doc.add_table(rows=1, cols=3)
+            t_sig.width = Inches(CW_INCH)
+            t_sig.autofit = False
+            t_sig.columns[0].width = Inches(CW_INCH*0.3)
+            t_sig.columns[1].width = Inches(CW_INCH*0.4)
+            t_sig.columns[2].width = Inches(CW_INCH*0.3)
+            
+            # Prepared By (Left)
             p_l = t_sig.cell(0, 0).paragraphs[0]
             p_l.add_run(f"Prepared By: {self.made_by_var.get()}").bold = True
-             
+            p_l.alignment = WD_ALIGN_PARAGRAPH.LEFT
             
-            p_r = t_sig.cell(0, 1).paragraphs[0]
+            # Center (Note)
+            if is_quotation:
+                p_c = t_sig.cell(0, 1).paragraphs[0]
+                p_c.add_run("Note: This is a system generated document so no need to sign.")
+                p_c.runs[0].font.color.rgb = RGBColor(255, 0, 0)
+                p_c.runs[0].font.size = Pt(8)
+                p_c.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Approved By (Right)
+            p_r = t_sig.cell(0, 2).paragraphs[0]
             p_r.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             p_r.add_run(f"Approved By: {self.approved_by_var.get()}").bold = True
             
-            fp = doc.sections[0].footer.paragraphs[0]
+            # Footer
+            footer_params = doc.sections[0].footer.paragraphs
+            if footer_params:
+                fp = footer_params[0]
+            else:
+                fp = doc.sections[0].footer.add_paragraph()
+            
             fp.alignment = get_align(self.footer_align_var.get())
             if self.footer_logo_path:
                 w_val = 7.5 if self.footer_full_width_var.get() else self.f_logo_size_var.get()
@@ -4067,25 +4246,46 @@ class QuotationApp:
             
             wb = openpyxl.Workbook(); ws = wb.active
             thin = Side(border_style="thin", color="000000"); border = Border(top=thin, left=thin, right=thin, bottom=thin)
-            # 1. Header Layout
-            ws.merge_cells("A1:B2"); ws['A1'] = "[LOGO 1]"; ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-            ws.merge_cells("C1:E2"); ws['C1'] = "[MID LOGO]"; ws['C1'].alignment = Alignment(horizontal='center', vertical='center')
             
-            ws.merge_cells("F1:H1"); ws['F1'] = "Quotation"; 
+            # Ensure grid lines are explicitly visible
+            ws.views.sheetView[0].showGridLines = True
+            
+            # 1. Header Images
+            ws.merge_cells("A1:B4")  # Left Logo Space
+            ws.merge_cells("C1:E4")  # Mid Logo Space
+            
+            if self.header_logo_path and os.path.exists(self.header_logo_path):
+                try:
+                    img = OpenpyxlImage(self.header_logo_path)
+                    # Resize approx
+                    img.height = 80
+                    img.width = 80 * (img.width / img.height)
+                    ws.add_image(img, 'A1')
+                except: pass
+                
+            if self.middle_logo_path and os.path.exists(self.middle_logo_path):
+                try:
+                    img = OpenpyxlImage(self.middle_logo_path)
+                    img.height = 80
+                    img.width = 80 * (img.width / img.height)
+                    ws.add_image(img, 'C1')
+                except: pass
+
+            ws.merge_cells("F1:H2"); ws['F1'] = "Quotation"; 
             ws['F1'].font = Font(size=24, bold=True, italic=True); ws['F1'].alignment = Alignment(horizontal='right')
             
-            ws.merge_cells("F2:H2"); ws['F2'] = f"Quotation No: {self.quotation_no_var.get()}"
-            ws['F2'].font = Font(bold=True); ws['F2'].alignment = Alignment(horizontal='right')
+            ws.merge_cells("F3:H3"); ws['F3'] = f"Quotation No: {self.quotation_no_var.get()}"
+            ws['F3'].font = Font(bold=True); ws['F3'].alignment = Alignment(horizontal='right')
+            ws.merge_cells("F4:H4"); ws['F4'] = f"Date: {self.doc_date_var.get()}"
+            ws['F4'].font = Font(bold=True); ws['F4'].alignment = Alignment(horizontal='right')
 
-            ws.merge_cells("D3:E3"); ws['D3'] = f"Vendor's Code: {self.vendor_code_var.get()}"
-            ws['D3'].font = Font(bold=True); ws['D3'].alignment = Alignment(horizontal='center')
+            ws.merge_cells("D5:E5"); ws['D5'] = f"Vendor's Code: {self.vendor_code_var.get()}"
+            ws['D5'].font = Font(bold=True); ws['D5'].alignment = Alignment(horizontal='center')
             
-            # Conditional Header in Excel (simplified)
-            # Just print rows as they are.
-            r=4
+            r=6
             for row_cfg in self.header_rows:
-                l_val = row_cfg['l_val'].get().strip()
-                r_val = row_cfg['r_val'].get().strip()
+                l_val = row_cfg['l_val'].get().strip() if 'l_val' in row_cfg else ""
+                r_val = row_cfg['r_val'].get().strip() if 'r_val' in row_cfg else ""
                 
                 if not l_val and not r_val: continue
                 
@@ -4093,19 +4293,24 @@ class QuotationApp:
                 r_lbl = row_cfg['r_label_var'].get() if 'r_label_var' in row_cfg else row_cfg['r_label']
                 
                 if l_val:
-                    ws[f"A{r}"] = l_lbl; ws[f"B{r}"] = l_val
+                    ws[f"A{r}"] = l_lbl; ws[f"A{r}"].font = Font(bold=True)
+                    ws[f"B{r}"] = l_val
                 if r_val:
-                    ws[f"E{r}"] = r_lbl; ws[f"F{r}"] = r_val
+                    ws[f"E{r}"] = r_lbl; ws[f"E{r}"].font = Font(bold=True)
+                    ws[f"F{r}"] = r_val
                 r+=1
             
             r += 2
             # Dynamic Columns
-            # Filter printable
             print_cols = [c for c in self.columns_config if c.get('printable', True)]
             
+            # Header Row Styling (Premium Dark Slate Blue with White Text)
             for i, c in enumerate(print_cols):
                 cell = ws.cell(row=r, column=i+1, value=c['label'])
-                cell.font = Font(bold=True); cell.border = border
+                cell.font = Font(color="FFFFFF", bold=True)
+                cell.border = border
+                cell.fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+                cell.alignment = Alignment(horizontal='center', vertical='center')
             r += 1
             
             for item in self.items_data:
@@ -4113,10 +4318,104 @@ class QuotationApp:
                     val = item.get(c['id'], "")
                     try: val = float(val)
                     except: pass
-                    ws.cell(row=r, column=i+1, value=val).border = border
+                    
+                    cell = ws.cell(row=r, column=i+1, value=val)
+                    cell.border = border
+                    
+                    # Premium Alignments & Number formats
+                    if c['type'] in ['number', 'calc', 'global_pct']:
+                        cell.alignment = Alignment(horizontal='right', vertical='center')
+                        if isinstance(val, (int, float)):
+                            cell.number_format = '#,##0.00'
+                    elif c['id'] in ['sno', 'uom']:
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                    else:
+                        cell.alignment = Alignment(horizontal='left', vertical='center')
                 r += 1
             
-            ws.cell(row=r+1, column=len(print_cols), value=self.total_lbl.cget("text")).font = Font(bold=True)
+            r += 1
+            curr = self.currency_symbol_var.get()
+            
+            # Sub Total
+            if self.print_subtotal_var.get():
+                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Total Amount (Excl. Tax):")
+                lbl_cell.font = Font(bold=True)
+                lbl_cell.alignment = Alignment(horizontal='right')
+                
+                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.subtotal_var.get()}")
+                val_cell.font = Font(bold=True)
+                val_cell.alignment = Alignment(horizontal='right')
+                r += 1
+
+            # Tax
+            if self.print_tax_var.get():
+                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Total Sales Tax:")
+                lbl_cell.font = Font(bold=True)
+                lbl_cell.alignment = Alignment(horizontal='right')
+                
+                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.tax_total_var.get()}")
+                val_cell.font = Font(bold=True)
+                val_cell.alignment = Alignment(horizontal='right')
+                r += 1
+
+            # Grand Total
+            if self.print_grand_total_var.get():
+                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Grand Total:")
+                lbl_cell.font = Font(bold=True)
+                lbl_cell.alignment = Alignment(horizontal='right')
+                
+                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.grand_total_var.get()}")
+                val_cell.font = Font(bold=True)
+                val_cell.alignment = Alignment(horizontal='right')
+                r += 1
+            
+            r += 2
+            ws.cell(row=r, column=1, value="Terms & Conditions:").font = Font(bold=True)
+            r += 1
+            # Simple text conversion for terms
+            terms = self._get_tagged_text().replace('<b>','').replace('</b>','').replace('<br/>','\n')
+            # remove other tags roughly
+            terms = re.sub(r'<[^>]+>', '', terms)
+            
+            ws.merge_cells(start_row=r, start_column=1, end_row=r+5, end_column=len(print_cols))
+            cell = ws.cell(row=r, column=1, value=terms)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            
+            r += 7
+            # Signatures
+            ws.cell(row=r, column=1, value=f"Prepared By: {self.made_by_var.get()}").font = Font(bold=True)
+            
+            sig_approved = ws.cell(row=r, column=len(print_cols), value=f"Approved By: {self.approved_by_var.get()}")
+            sig_approved.font = Font(bold=True)
+            sig_approved.alignment = Alignment(horizontal='right')
+            
+            # Auto-fit Column Widths with Smart Minimums
+            from openpyxl.utils import get_column_letter
+            for col in ws.columns:
+                max_len = 0
+                col_num = col[0].column
+                col_letter = get_column_letter(col_num)
+                for cell in col:
+                    # Ignore merged logo headers (rows 1-5) and bottom notes to keep column scaling normal
+                    if cell.row < 6:
+                        continue
+                    if cell.value:
+                        val_str = str(cell.value)
+                        lines = val_str.split('\n')
+                        for line in lines:
+                            if len(line) > max_len:
+                                max_len = len(line)
+                
+                # Dynamic column width padding and index-based minimum overrides
+                min_w = 12
+                if col_num == 1: min_w = 8     # S.No
+                elif col_num == 2: min_w = 38  # Description (wider to fit content)
+                elif col_num == 3: min_w = 10  # UOM
+                elif col_num == 7: min_w = 26  # Tax / Totals Labels (prevents "Total Amc" cutting off)
+                elif col_num == 8: min_w = 18  # Total / Totals Values (prevents currency truncation)
+                
+                ws.column_dimensions[col_letter].width = max(max_len + 3, min_w)
+            
             wb.save(f)
             messagebox.showinfo("Success", f"Excel Saved: {f}")
         except Exception as e:

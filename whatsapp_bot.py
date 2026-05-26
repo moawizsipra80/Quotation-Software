@@ -10,6 +10,7 @@ import time
 import os
 import random
 import urllib.parse
+from selenium.webdriver.common.action_chains import ActionChains
 
 def send_messages(file_path, message_text, attachment_path=None):
     # 1. File Read & Validation
@@ -24,7 +25,7 @@ def send_messages(file_path, message_text, attachment_path=None):
 
     # --- SMART AUTO-DETECTION ---
     phone_col = None
-    priority_keywords = ['phone', 'mobile', 'contact', 'whatsapp', 'cell', 'number']
+    priority_keywords = ['phone', 'mobile', 'contact', 'whatsapp', 'cell', 'number','phone number','mobile number', 'contact number' , 'cell number' , 'phone no' ,'mobile no','contact no', 'cell no','whatsapp number','whatsapp no','whatsapp_no','phone_no','contact_no','mobile_no','cell_no']
     
     # Strip spaces from column names
     df.columns = [str(c).strip() for c in df.columns]
@@ -72,15 +73,18 @@ def send_messages(file_path, message_text, attachment_path=None):
         print("Opening WhatsApp Web...")
         driver.get("https://web.whatsapp.com")
         
-        # 3. Login Wait
         try:
             print("Please Scan QR Code within 60 seconds...")
+            # Wait for the search box (indicating main interface is loaded)
             wait.until(EC.presence_of_element_located((By.XPATH, '//div[@contenteditable="true"][@data-tab="3"]')))
-            print("✅ Login Successful!")
-            time.sleep(2)
+            
+            # Extra wait to ensure "Loading Chats" is gone and interface is stable
+            print("✅ Login Detected. Waiting for chats to sync...")
+            time.sleep(10) 
+            
         except:
-            print("⚠️ Timeout: Assuming logged in.")
-            time.sleep(3)
+            print("⚠️ Timeout: Assuming logged in or session active.")
+            time.sleep(5)
 
         sent_count = 0
         failed_count = 0
@@ -119,13 +123,36 @@ def send_messages(file_path, message_text, attachment_path=None):
                     driver.switch_to.alert.accept()
                 except: pass
 
-                # --- WAIT FOR LOAD & SEND TEXT ---
+                # --- CHECK FOR INVALID NUMBER OR CHAT LOAD ---
                 try:
-                    # Target the main chat input
+                    # We wait for EITHER the Input Box OR the Invalid Number Popup
+                    # Since we can't easily wait for "one of two" with simple EC, we split the logic.
+                    
+                    # 1. Quick check for Invalid Number Popup (approx 5-10s wait)
+                    try:
+                        err_popup = WebDriverWait(driver, 8).until(
+                            EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "phone number shared via url is invalid")]'))
+                        )
+                        if err_popup:
+                            print(f"   -> ❌ Skipped: Invalid WhatsApp Number.")
+                            failed_count += 1
+                            # Create an action chain to close the popup if there's an OK button, or just continue which loads next URL
+                            # Usually hitting ESC closes it
+                            try:
+                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                            except: pass
+                            
+                            time.sleep(2)
+                            continue # Skip to next number
+                    except:
+                        # No error popup found, proceed to normal chat loading
+                        pass
+
+                    # 2. Wait for Chat Input
                     input_box = wait.until(
                         EC.presence_of_element_located((By.XPATH, '//div[@contenteditable="true"][@data-tab="10"]'))
                     )
-                    time.sleep(3) # Wait for URL text to populate
+                    time.sleep(2) # Stabilize
                     
                     # Safety check: if box is empty, type message manually
                     current_text = input_box.text.strip()
@@ -144,38 +171,70 @@ def send_messages(file_path, message_text, attachment_path=None):
                     # --- ATTACHMENT LOGIC ---
                     if attachment_path and os.path.exists(attachment_path):
                         try:
-                            # 1. Identify File Type
+                            print("   -> 📎 Starting attachment process...")
+                            time.sleep(2)
+
+                            # 1. Click Attach Button (Clip or Plus) - Essential for DOM to be ready
+                            try:
+                                # Common selectors for Attach button (Clip or Plus icon)
+                                attach_xpath = '//div[@title="Attach"] | //span[@data-icon="clip"] | //span[@data-icon="plus"]'
+                                attach_btn = wait.until(EC.element_to_be_clickable((By.XPATH, attach_xpath)))
+                                attach_btn.click()
+                                time.sleep(1.5) # Wait for menu
+                            except Exception as btn_err:
+                                print(f"   -> ⚠️ Warning: Attach button click failed ({btn_err}). Trying direct input...")
+
+                            # 2. Identify File Type
                             _, file_extension = os.path.splitext(attachment_path)
                             ext = file_extension.lower()
-                            is_image = ext in ['.jpg', '.jpeg', '.png', '.mp4', '.3gp']
+                            is_image = ext in ['.jpg', '.jpeg', '.png', '.mp4', '.3gp', '.gif']
                             
-                            # 2. Find Hidden Input (More reliable than clicking Attach button)
+                            # 3. Find Hidden Input
                             if is_image:
-                                input_xpath = '//input[@accept="image/*,video/mp4,video/3gpp,video/quicktime"]'
                                 type_msg = "Image/Video"
+                                # Try specific input for images (using contains for robustness)
+                                input_xpath = '//input[contains(@accept, "image")]'
                             else:
-                                input_xpath = '//input[@accept="*"]'
                                 type_msg = "Document"
+                                input_xpath = '//input[contains(@accept, "*")]'
 
-                            file_input = wait.until(EC.presence_of_element_located((By.XPATH, input_xpath)))
+                            try:
+                                # Try specific input first
+                                file_input = driver.find_element(By.XPATH, input_xpath)
+                            except:
+                                # Fallback to generic file input
+                                file_input = driver.find_element(By.XPATH, '//input[@type="file"]')
+
+                            # Send Absolute Path
                             file_input.send_keys(os.path.abspath(attachment_path))
                             
-                            # 3. Wait for Preview & Click Send
-                            time.sleep(3) # Wait for preview to render
+                            # 4. Wait for Preview & Click Send
+                            print(f"   -> 📎 Uploaded. Waiting for preview...")
+                            
+                            # Wait for send button (Green circle with plane)
                             send_btn_xpath = '//span[@data-icon="send"]'
+                            
+                            # Wait longer for images to process
                             send_doc_btn = wait.until(EC.element_to_be_clickable((By.XPATH, send_btn_xpath)))
+                            time.sleep(1) # Extra buffer
                             send_doc_btn.click()
                             
-                            print(f"   -> 📎 {type_msg} Sent")
+                            print(f"   -> 📎 {type_msg} Sent Successfully")
                             time.sleep(3) # Wait for transfer
                             
                         except Exception as file_err:
-                            print(f"   -> ❌ Attachment Error: {file_err}. (Reason: WhatsApp UI might have changed or file input was hidden)")
+                            print(f"   -> ❌ Attachment Error: {file_err}")
+                            # Close attachment menu if stuck open
+                            try:
+                                ActionChains(driver).send_keys(Keys.ESCAPE).perform()
+                            except: pass
 
                     sent_count += 1
                     
-                    delay = random.randint(8, 15)
-                    print(f"   -> Waiting {delay}s...")
+                    # --- RANDOMIZED DELAY (HUMAN BEHAVIOR) ---
+                    # 15 to 25 seconds is a safe "human" window
+                    delay = random.randint(11, 15) 
+                    print(f"   -> Humanizing: Waiting {delay}s...")
                     time.sleep(delay)
 
                 except Exception as e:
