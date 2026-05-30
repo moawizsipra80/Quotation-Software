@@ -1674,6 +1674,8 @@ class QuotationApp:
             # Smart Ref No Loading
             doc_ref = h.get("quot_no") or h.get("ref_no") or h.get("inv_no") or ""
             self.quotation_no_var.set(doc_ref)
+            if hasattr(self, 'details_doc_no_var'):
+                self.details_doc_no_var.set(h.get("details_doc_no") or doc_ref)
             self.client_name_var.set(h.get("client_name", ""))
             self.doc_date_var.set(h.get("date", ""))
             self.doc_validity_var.set(h.get("validity", ""))
@@ -3608,6 +3610,7 @@ class QuotationApp:
         def open_pdf_logic():
             try:
                 if os.path.exists(tmp_path):
+                    self.root.lower()
                     if os.name == 'nt':  # Windows
                         os.startfile(tmp_path)
                     else:  # Mac/Linux
@@ -3618,8 +3621,8 @@ class QuotationApp:
             except Exception as e:
                 messagebox.showerror("Error", f"Could not open PDF: {e}")
 
-        # Start PDF immediately
-        open_pdf_logic()
+        # Start PDF with a slight delay to ensure it launches on top of the focused Tkinter window
+        self.root.after(500, open_pdf_logic)
 
         # 5. Confirmation Popup (Delay slightly to ensure it stays on top of app)
         top = tk.Toplevel(self.root)
@@ -3913,29 +3916,34 @@ class QuotationApp:
                     align = self.footer_align_var.get()
                     if align == "Center":
                         x_pos = (page_w - w) / 2
+                        y_pos = 15  # Moved lower for more space
                     elif align == "Right":
                         x_pos = page_w - MARGIN - w
+                        y_pos = 60
                     else: # Left
                         x_pos = MARGIN
+                        y_pos = 60
                     # Image draw karein
-                    f_img.drawOn(canvas, x_pos, 60) 
+                    f_img.drawOn(canvas, x_pos, y_pos) 
             
-            # --- SOCIAL ICONS WITH LINKS ---
+            # --- SOCIAL ICONS WITH LINKS (VERTICALLY STACKED AT BOTTOM-LEFT) ---
             try:
-                social_x, social_y = MARGIN, 35
+                social_x = MARGIN
+                social_y_start = 15
                 icons = [
                     ('#0066cc', 'W', 'https://www.orientmarketing.com.pk/'), 
                     ('#FF0000', 'Y', 'https://www.youtube.com/@Antarc-Technologies'), 
                     ('#1877F2', 'f', 'https://www.facebook.com/orientmarketing.com.pk')
                 ]
                 for idx, (color, sym, url) in enumerate(icons):
-                    x = social_x + idx * 22
+                    # Stacking vertically upwards with spacing
+                    y = social_y_start + idx * 20
                     canvas.setFillColor(color)
-                    canvas.rect(x, social_y, 16, 16, fill=1, stroke=0)
+                    canvas.rect(social_x, y, 16, 16, fill=1, stroke=0)
                     canvas.setFillColor(colors.white)
                     canvas.setFont("Helvetica-Bold", 10)
-                    canvas.drawString(x+4, social_y+4, sym)
-                    canvas.linkURL(url, (x, social_y, x + 16, social_y + 16))
+                    canvas.drawString(social_x+4, y+4, sym)
+                    canvas.linkURL(url, (social_x, y, social_x + 16, y + 16))
             except: pass
             
             if qr_img:
@@ -4241,180 +4249,443 @@ class QuotationApp:
             messagebox.showerror("Error", "openpyxl library not installed.")
             return
         try:
+            from openpyxl.utils import get_column_letter
             f = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")], parent=self.root)
             if not f: return
             
             wb = openpyxl.Workbook(); ws = wb.active
-            thin = Side(border_style="thin", color="000000"); border = Border(top=thin, left=thin, right=thin, bottom=thin)
             
-            # Ensure grid lines are explicitly visible
+            # Explicit row heights for header rows to accommodate logo banner cleanly
+            ws.row_dimensions[1].height = 25
+            ws.row_dimensions[2].height = 25
+            ws.row_dimensions[3].height = 25
+            
+            # --- COLOR & STYLE SYSTEM TO MATCH SCREENSHOT EXACTLY ---
+            # Premium classical typography
+            font_title = Font(name="Times New Roman", size=24, bold=True, italic=True, color="000000")
+            font_bold = Font(name="Arial", size=10, bold=True, color="000000")
+            font_normal = Font(name="Arial", size=10, color="000000")
+            font_header = Font(name="Arial", size=10, bold=True, color="000000")
+            
+            # Harmonious color palette matching screenshot exactly
+            fill_label = PatternFill(start_color="A6B9D0", end_color="A6B9D0", fill_type="solid")        # Premium Slate/Steel Grey matching your sample exactly
+            fill_header = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")       # Soft Light Blue/Grey (#DCE6F1)
+            fill_project = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+            
+            # Solid black borders for premium structure
+            thin_black = Side(border_style="thin", color="000000")
+            border_all = Border(top=thin_black, left=thin_black, right=thin_black, bottom=thin_black)
+            
+            # Ensure grid lines are explicitly visible in Excel
             ws.views.sheetView[0].showGridLines = True
             
-            # 1. Header Images
-            ws.merge_cells("A1:B4")  # Left Logo Space
-            ws.merge_cells("C1:E4")  # Mid Logo Space
+            # Helper to style entire cell ranges (especially merged ranges)
+            def style_range(ws, cell_range, font=None, alignment=None, fill=None, border=None):
+                for row in ws[cell_range]:
+                    for cell in row:
+                        if font is not None: cell.font = font
+                        if alignment is not None: cell.alignment = alignment
+                        if fill is not None: cell.fill = fill
+                        if border is not None: cell.border = border
             
+            doc_title = self.doc_title_var.get()
+            is_invoice_or_challan = doc_title in ["Sales Tax Invoice", "Commercial Invoice", "Delivery Challan", "Delivery Chalan"]
+            
+            # 1. Left Logo Space (A1:C3 Merged)
+            ws.merge_cells("A1:C3")
+            style_range(ws, "A1:C3", border=border_all)
             if self.header_logo_path and os.path.exists(self.header_logo_path):
                 try:
                     img = OpenpyxlImage(self.header_logo_path)
-                    # Resize approx
-                    img.height = 80
-                    img.width = 80 * (img.width / img.height)
+                    img.height = 70
+                    img.width = 70 * (img.width / img.height)
                     ws.add_image(img, 'A1')
                 except: pass
                 
-            if self.middle_logo_path and os.path.exists(self.middle_logo_path):
-                try:
-                    img = OpenpyxlImage(self.middle_logo_path)
-                    img.height = 80
-                    img.width = 80 * (img.width / img.height)
-                    ws.add_image(img, 'C1')
-                except: pass
+            # Right Title (F1:H3 Merged - Stylized Script Font)
+            ws.merge_cells("F1:H3")
+            style_range(ws, "F1:H3", border=border_all)
+            ws["F1"] = doc_title
+            style_range(ws, "F1:H3", font=font_title, alignment=Alignment(horizontal='right', vertical='center'))
+            
+            # Empty filler for D1:E3
+            style_range(ws, "D1:E3", border=border_all)
 
-            ws.merge_cells("F1:H2"); ws['F1'] = "Quotation"; 
-            ws['F1'].font = Font(size=24, bold=True, italic=True); ws['F1'].alignment = Alignment(horizontal='right')
+            # Details Grid Layout (Rows 4 to 8)
+            left_fields = []
+            right_fields = []
             
-            ws.merge_cells("F3:H3"); ws['F3'] = f"Quotation No: {self.quotation_no_var.get()}"
-            ws['F3'].font = Font(bold=True); ws['F3'].alignment = Alignment(horizontal='right')
-            ws.merge_cells("F4:H4"); ws['F4'] = f"Date: {self.doc_date_var.get()}"
-            ws['F4'].font = Font(bold=True); ws['F4'].alignment = Alignment(horizontal='right')
-
-            ws.merge_cells("D5:E5"); ws['D5'] = f"Vendor's Code: {self.vendor_code_var.get()}"
-            ws['D5'].font = Font(bold=True); ws['D5'].alignment = Alignment(horizontal='center')
-            
-            r=6
-            for row_cfg in self.header_rows:
-                l_val = row_cfg['l_val'].get().strip() if 'l_val' in row_cfg else ""
-                r_val = row_cfg['r_val'].get().strip() if 'r_val' in row_cfg else ""
+            if is_invoice_or_challan:
+                left_fields = [
+                    ("Client", self.client_name_var.get()),
+                    ("Address:", self.client_addr_var.get()),
+                    ("Contact person", self.client_contact_var.get()),
+                    ("Project", getattr(self, 'project_var', tk.StringVar()).get()),
+                    ("Email:", self.client_email_var.get())
+                ]
                 
-                if not l_val and not r_val: continue
-                
-                l_lbl = row_cfg['l_label_var'].get() if 'l_label_var' in row_cfg else row_cfg['l_label']
-                r_lbl = row_cfg['r_label_var'].get() if 'r_label_var' in row_cfg else row_cfg['r_label']
-                
-                if l_val:
-                    ws[f"A{r}"] = l_lbl; ws[f"A{r}"].font = Font(bold=True)
-                    ws[f"B{r}"] = l_val
-                if r_val:
-                    ws[f"E{r}"] = r_lbl; ws[f"E{r}"].font = Font(bold=True)
-                    ws[f"F{r}"] = r_val
-                r+=1
+                right_fields = [
+                    ("Date:", self.doc_date_var.get()),
+                    ("Quot", self.quotation_no_var.get()),
+                    ("Validity", getattr(self, 'doc_validity_var', tk.StringVar()).get()),
+                    ("Revise Quot", getattr(self, 'revision_no_var', tk.StringVar()).get()),
+                    ("Phone No:", getattr(self, 'client_phone_var', tk.StringVar()).get())
+                ]
+            else:
+                # Standard Quotation details from self.header_rows
+                for row_cfg in self.header_rows:
+                    l_val = row_cfg['l_val'].get().strip() if 'l_val' in row_cfg else ""
+                    r_val = row_cfg['r_val'].get().strip() if 'r_val' in row_cfg else ""
+                    l_lbl = row_cfg['l_label_var'].get() if 'l_label_var' in row_cfg else row_cfg['l_label']
+                    r_lbl = row_cfg['r_label_var'].get() if 'r_label_var' in row_cfg else row_cfg['r_label']
+                    if l_val or r_val:
+                        left_fields.append((l_lbl, l_val))
+                        right_fields.append((r_lbl, r_val))
             
-            r += 2
-            # Dynamic Columns
-            print_cols = [c for c in self.columns_config if c.get('printable', True)]
+            # Dynamic details block alignment matching screenshot
+            r = 4
+            max_details = max(len(left_fields), len(right_fields))
+            for idx in range(max_details):
+                lf_lbl, lf_val = left_fields[idx] if idx < len(left_fields) else ("", "")
+                rf_lbl, rf_val = right_fields[idx] if idx < len(right_fields) else ("", "")
+                
+                # Left Side (Columns A to E)
+                ws.cell(row=r, column=1, value=lf_lbl)
+                style_range(ws, f"A{r}:A{r}", font=font_bold, fill=fill_label, alignment=Alignment(horizontal='left', vertical='center'), border=border_all)
+                
+                left_val_range = f"B{r}:E{r}"
+                ws.merge_cells(left_val_range)
+                ws.cell(row=r, column=2, value=lf_val)
+                style_range(ws, left_val_range, font=font_normal, alignment=Alignment(horizontal='left', vertical='center', wrap_text=True), border=border_all)
+                
+                # Right Side (Columns F to H)
+                ws.cell(row=r, column=6, value=rf_lbl)
+                style_range(ws, f"F{r}:F{r}", font=font_bold, fill=fill_label, alignment=Alignment(horizontal='left', vertical='center'), border=border_all)
+                
+                right_val_range = f"G{r}:H{r}"
+                ws.merge_cells(right_val_range)
+                ws.cell(row=r, column=7, value=rf_val)
+                style_range(ws, right_val_range, font=font_normal, alignment=Alignment(horizontal='left', vertical='center', wrap_text=True), border=border_all)
+                
+                ws.row_dimensions[r].height = 20
+                r += 1
+                
+            # Row 9: Quotation For Row
+            ws.cell(row=r, column=1, value="Quotation For:")
+            style_range(ws, f"A{r}:A{r}", font=font_bold, fill=fill_label, alignment=Alignment(horizontal='left', vertical='center'), border=border_all)
             
-            # Header Row Styling (Premium Dark Slate Blue with White Text)
-            for i, c in enumerate(print_cols):
-                cell = ws.cell(row=r, column=i+1, value=c['label'])
-                cell.font = Font(color="FFFFFF", bold=True)
-                cell.border = border
-                cell.fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-                cell.alignment = Alignment(horizontal='center', vertical='center')
+            project_range = f"B{r}:H{r}"
+            ws.merge_cells(project_range)
+            project_val = getattr(self, 'doc_subtitle_var', tk.StringVar()).get() or "Supply and Installation of Equipment"
+            ws.cell(row=r, column=2, value=project_val)
+            style_range(ws, project_range, font=font_bold, fill=fill_project, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            ws.row_dimensions[r].height = 22
             r += 1
             
-            for item in self.items_data:
-                for i, c in enumerate(print_cols):
-                    val = item.get(c['id'], "")
-                    try: val = float(val)
-                    except: pass
-                    
-                    cell = ws.cell(row=r, column=i+1, value=val)
-                    cell.border = border
-                    
-                    # Premium Alignments & Number formats
-                    if c['type'] in ['number', 'calc', 'global_pct']:
-                        cell.alignment = Alignment(horizontal='right', vertical='center')
-                        if isinstance(val, (int, float)):
-                            cell.number_format = '#,##0.00'
-                    elif c['id'] in ['sno', 'uom']:
-                        cell.alignment = Alignment(horizontal='center', vertical='center')
-                    else:
-                        cell.alignment = Alignment(horizontal='left', vertical='center')
+            table_header_row = r
+            
+            # --- Table Header Row (With Vertical Merging for S.No, Descriptions, UOM, Qty) ---
+            # S. No
+            ws.merge_cells(f"A{r}:A{r+1}")
+            ws.cell(row=r, column=1, value="S.\nNo")
+            style_range(ws, f"A{r}:A{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center', wrap_text=True), border=border_all)
+            
+            # Descriptions (merged across B and C vertically)
+            ws.merge_cells(f"B{r}:C{r+1}")
+            ws.cell(row=r, column=2, value="Descriptions")
+            style_range(ws, f"B{r}:C{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            # UOM
+            ws.merge_cells(f"D{r}:D{r+1}")
+            ws.cell(row=r, column=4, value="UOM")
+            style_range(ws, f"D{r}:D{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            # Qty
+            ws.merge_cells(f"E{r}:E{r+1}")
+            ws.cell(row=r, column=5, value="Qty")
+            style_range(ws, f"E{r}:E{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            # Unit Rate (with currency under-label in next row)
+            ws.cell(row=r, column=6, value="Unit Rate")
+            style_range(ws, f"F{r}:F{r}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            ws.cell(row=r+1, column=6, value="PKR")
+            style_range(ws, f"F{r+1}:F{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            # Amount
+            ws.cell(row=r, column=7, value="Amount\nExcluding Taxes")
+            style_range(ws, f"G{r}:G{r}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center', wrap_text=True), border=border_all)
+            ws.cell(row=r+1, column=7, value="PKR")
+            style_range(ws, f"G{r+1}:G{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            # Total
+            ws.cell(row=r, column=8, value="Total\nIncluding Taxes")
+            style_range(ws, f"H{r}:H{r}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center', wrap_text=True), border=border_all)
+            ws.cell(row=r+1, column=8, value="PKR")
+            style_range(ws, f"H{r+1}:H{r+1}", font=font_header, fill=fill_header, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+            
+            ws.row_dimensions[r].height = 24
+            ws.row_dimensions[r+1].height = 18
+            r += 2
+            
+            # 4. Table Data Rows (With Smart Split of Descriptions & Clean Borders)
+            for idx, item in enumerate(self.items_data):
+                # S.No
+                ws.cell(row=r, column=1, value=item.get('sno', idx+1))
+                style_range(ws, f"A{r}:A{r}", font=font_normal, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+                
+                # Split Description if tabs or double spaces exist to fill Column B & C
+                desc_val = item.get('desc', "")
+                b_val, c_val = "", ""
+                if "\t" in desc_val:
+                    parts = desc_val.split("\t", 1)
+                    b_val = parts[0]
+                    c_val = parts[1]
+                elif "  " in desc_val:
+                    parts = desc_val.split("  ", 1)
+                    b_val = parts[0]
+                    c_val = parts[1]
+                else:
+                    b_val = desc_val
+                    c_val = ""
+                
+                ws.cell(row=r, column=2, value=b_val)
+                if c_val:
+                    ws.cell(row=r, column=3, value=c_val)
+                    style_range(ws, f"B{r}:B{r}", font=font_normal, alignment=Alignment(horizontal='left', vertical='center', wrap_text=True), border=border_all)
+                    style_range(ws, f"C{r}:C{r}", font=font_normal, alignment=Alignment(horizontal='left', vertical='center', wrap_text=True), border=border_all)
+                else:
+                    ws.merge_cells(f"B{r}:C{r}")
+                    style_range(ws, f"B{r}:C{r}", font=font_normal, alignment=Alignment(horizontal='left', vertical='center', wrap_text=True), border=border_all)
+                
+                # UOM
+                ws.cell(row=r, column=4, value=item.get('uom', ""))
+                style_range(ws, f"D{r}:D{r}", font=font_normal, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+                
+                # Qty
+                ws.cell(row=r, column=5, value=item.get('qty', 0))
+                style_range(ws, f"E{r}:E{r}", font=font_normal, alignment=Alignment(horizontal='center', vertical='center'), border=border_all)
+                
+                # Price
+                p_val = item.get('price', 0)
+                try: p_val = float(p_val)
+                except: pass
+                ws.cell(row=r, column=6, value=p_val)
+                cell_p = ws.cell(row=r, column=6)
+                if isinstance(p_val, (int, float)): cell_p.number_format = '#,##0.00'
+                style_range(ws, f"F{r}:F{r}", font=font_normal, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                
+                # Amount
+                a_val = item.get('amount', 0)
+                try: a_val = float(a_val)
+                except: pass
+                ws.cell(row=r, column=7, value=a_val)
+                cell_a = ws.cell(row=r, column=7)
+                if isinstance(a_val, (int, float)): cell_a.number_format = '#,##0.00'
+                style_range(ws, f"G{r}:G{r}", font=font_normal, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                
+                # Total
+                t_val = item.get('total', 0)
+                try: t_val = float(t_val)
+                except: pass
+                ws.cell(row=r, column=8, value=t_val)
+                cell_t = ws.cell(row=r, column=8)
+                if isinstance(t_val, (int, float)): cell_t.number_format = '#,##0.00'
+                style_range(ws, f"H{r}:H{r}", font=font_normal, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                
+                ws.row_dimensions[r].height = 22
                 r += 1
             
+            table_end_row = r
             r += 1
+            
+            # 5. Summary / Totals Section
             curr = self.currency_symbol_var.get()
             
             # Sub Total
-            if self.print_subtotal_var.get():
-                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Total Amount (Excl. Tax):")
-                lbl_cell.font = Font(bold=True)
-                lbl_cell.alignment = Alignment(horizontal='right')
+            if getattr(self, 'print_subtotal_var', None) and self.print_subtotal_var.get():
+                lbl_range = f"A{r}:G{r}"
+                ws.merge_cells(lbl_range)
+                ws.cell(row=r, column=1, value="Total Amount (Excl. Tax):")
+                style_range(ws, lbl_range, font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
                 
-                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.subtotal_var.get()}")
-                val_cell.font = Font(bold=True)
-                val_cell.alignment = Alignment(horizontal='right')
+                ws.cell(row=r, column=8, value=f"{curr} {self.subtotal_var.get()}")
+                style_range(ws, f"H{r}:H{r}", font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                ws.row_dimensions[r].height = 20
                 r += 1
 
-            # Tax
-            if self.print_tax_var.get():
-                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Total Sales Tax:")
-                lbl_cell.font = Font(bold=True)
-                lbl_cell.alignment = Alignment(horizontal='right')
+            # Sales Tax
+            if getattr(self, 'print_tax_var', None) and self.print_tax_var.get():
+                lbl_range = f"A{r}:G{r}"
+                ws.merge_cells(lbl_range)
+                ws.cell(row=r, column=1, value="Total Sales Tax:")
+                style_range(ws, lbl_range, font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
                 
-                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.tax_total_var.get()}")
-                val_cell.font = Font(bold=True)
-                val_cell.alignment = Alignment(horizontal='right')
+                ws.cell(row=r, column=8, value=f"{curr} {self.tax_total_var.get()}")
+                style_range(ws, f"H{r}:H{r}", font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                ws.row_dimensions[r].height = 20
                 r += 1
 
             # Grand Total
-            if self.print_grand_total_var.get():
-                lbl_cell = ws.cell(row=r, column=len(print_cols)-1, value="Grand Total:")
-                lbl_cell.font = Font(bold=True)
-                lbl_cell.alignment = Alignment(horizontal='right')
+            if getattr(self, 'print_grand_total_var', None) and self.print_grand_total_var.get():
+                lbl_range = f"A{r}:G{r}"
+                ws.merge_cells(lbl_range)
+                ws.cell(row=r, column=1, value="Grand Total:")
+                style_range(ws, lbl_range, font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
                 
-                val_cell = ws.cell(row=r, column=len(print_cols), value=f"{curr} {self.grand_total_var.get()}")
-                val_cell.font = Font(bold=True)
-                val_cell.alignment = Alignment(horizontal='right')
+                ws.cell(row=r, column=8, value=f"{curr} {self.grand_total_var.get()}")
+                style_range(ws, f"H{r}:H{r}", font=font_bold, alignment=Alignment(horizontal='right', vertical='center'), border=border_all)
+                ws.row_dimensions[r].height = 22
                 r += 1
             
-            r += 2
-            ws.cell(row=r, column=1, value="Terms & Conditions:").font = Font(bold=True)
+            # 6. Delivery Challan Specific Fields (Purpose, Transport, etc.)
+            if doc_title in ["Delivery Challan", "Delivery Chalan"]:
+                r += 1
+                
+                def write_challan_field(ws, label, value, r_idx):
+                    lbl_range = f"A{r_idx}:B{r_idx}"
+                    ws.merge_cells(lbl_range)
+                    ws.cell(row=r_idx, column=1, value=label)
+                    style_range(ws, lbl_range, font=font_bold, fill=fill_label, border=border_all)
+                    
+                    val_range = f"C{r_idx}:H{r_idx}"
+                    ws.merge_cells(val_range)
+                    ws.cell(row=r_idx, column=3, value=value)
+                    style_range(ws, val_range, font=font_normal, alignment=Alignment(horizontal='left', vertical='center'), border=border_all)
+                    ws.row_dimensions[r_idx].height = 20
+                
+                # Purpose
+                purp_vals = []
+                if getattr(self, 'purpose_sale_var', None) and self.purpose_sale_var.get(): purp_vals.append("[✓] Sale")
+                else: purp_vals.append("[ ] Sale")
+                if getattr(self, 'purpose_job_var', None) and self.purpose_job_var.get(): purp_vals.append("[✓] Job")
+                else: purp_vals.append("[ ] Job")
+                if getattr(self, 'purpose_ret_var', None) and self.purpose_ret_var.get(): purp_vals.append("[✓] Returnable")
+                else: purp_vals.append("[ ] Returnable")
+                if getattr(self, 'purpose_nonret_var', None) and self.purpose_nonret_var.get(): purp_vals.append("[✓] Non-Returnable")
+                else: purp_vals.append("[ ] Non-Returnable")
+                write_challan_field(ws, "Purpose:", "   ".join(purp_vals), r)
+                r += 1
+                
+                # Declaration
+                write_challan_field(ws, "Declaration:", "Goods delivered in good condition.", r)
+                r += 1
+                
+                # Source
+                src_vals = []
+                if getattr(self, 'source_public_var', None) and self.source_public_var.get(): src_vals.append("[✓] Public")
+                else: src_vals.append("[ ] Public")
+                if getattr(self, 'source_special_var', None) and self.source_special_var.get(): src_vals.append("[✓] Special")
+                else: src_vals.append("[ ] Special")
+                if getattr(self, 'source_other_var', None) and self.source_other_var.get(): src_vals.append("[✓] Other")
+                else: src_vals.append("[ ] Other")
+                write_challan_field(ws, "Source:", "   ".join(src_vals), r)
+                r += 2
+                
+                # Special Vehicle / Cargo details
+                if getattr(self, 'source_special_var', None) and self.source_special_var.get():
+                    hdr_range = f"A{r}:H{r}"
+                    ws.merge_cells(hdr_range)
+                    ws.cell(row=r, column=1, value="SPECIAL VEHICLE DATA")
+                    style_range(ws, hdr_range, font=font_bold, fill=fill_header, alignment=Alignment(horizontal='center'), border=border_all)
+                    r += 1
+                    
+                    fields = [
+                        ("Vehicle No:", self.vehicle_num_var.get(), "Date:", self.trans_date_var.get()),
+                        ("Driver CNIC:", self.driver_cnic_var.get(), "", "")
+                    ]
+                    for f_item in fields:
+                        ws.cell(row=r, column=1, value=f_item[0])
+                        style_range(ws, f"A{r}:A{r}", font=font_bold, fill=fill_label, border=border_all)
+                        
+                        ws.cell(row=r, column=2, value=f_item[1])
+                        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
+                        style_range(ws, f"B{r}:C{r}", font=font_normal, border=border_all)
+                        
+                        if f_item[2]:
+                            ws.cell(row=r, column=4, value=f_item[2])
+                            style_range(ws, f"D{r}:D{r}", font=font_bold, fill=fill_label, border=border_all)
+                            
+                            ws.cell(row=r, column=5, value=f_item[3])
+                            ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=8)
+                            style_range(ws, f"E{r}:H{r}", font=font_normal, border=border_all)
+                        else:
+                            ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=8)
+                            style_range(ws, f"D{r}:H{r}", font=font_normal, border=border_all)
+                        ws.row_dimensions[r].height = 20
+                        r += 1
+                    r += 1
+                    
+                if getattr(self, 'source_public_var', None) and self.source_public_var.get():
+                    hdr_range = f"A{r}:H{r}"
+                    ws.merge_cells(hdr_range)
+                    ws.cell(row=r, column=1, value="PUBLIC CARGO TRANSPORT DATA")
+                    style_range(ws, hdr_range, font=font_bold, fill=fill_header, alignment=Alignment(horizontal='center'), border=border_all)
+                    r += 1
+                    
+                    fields = [
+                        ("Transport:", self.trans_by_var.get(), "Bilty No:", self.bilty_no_var.get()),
+                        ("Booking Date:", self.booking_date_var.get(), "Charges:", self.trans_charges_var.get()),
+                        ("Address:", self.cargo_address_var.get(), "", "")
+                    ]
+                    for f_item in fields:
+                        ws.cell(row=r, column=1, value=f_item[0])
+                        style_range(ws, f"A{r}:A{r}", font=font_bold, fill=fill_label, border=border_all)
+                        
+                        ws.cell(row=r, column=2, value=f_item[1])
+                        ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=3)
+                        style_range(ws, f"B{r}:C{r}", font=font_normal, border=border_all)
+                        
+                        if f_item[2]:
+                            ws.cell(row=r, column=4, value=f_item[2])
+                            style_range(ws, f"D{r}:D{r}", font=font_bold, fill=fill_label, border=border_all)
+                            
+                            ws.cell(row=r, column=5, value=f_item[3])
+                            ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=8)
+                            style_range(ws, f"E{r}:H{r}", font=font_normal, border=border_all)
+                        else:
+                            ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=8)
+                            style_range(ws, f"D{r}:H{r}", font=font_normal, border=border_all)
+                        ws.row_dimensions[r].height = 20
+                        r += 1
+                    r += 1
+
+            # 7. Terms & Conditions
             r += 1
-            # Simple text conversion for terms
+            ws.cell(row=r, column=1, value="Terms & Conditions:")
+            style_range(ws, f"A{r}:A{r}", font=font_bold)
+            r += 1
+            
             terms = self._get_tagged_text().replace('<b>','').replace('</b>','').replace('<br/>','\n')
-            # remove other tags roughly
             terms = re.sub(r'<[^>]+>', '', terms)
             
-            ws.merge_cells(start_row=r, start_column=1, end_row=r+5, end_column=len(print_cols))
-            cell = ws.cell(row=r, column=1, value=terms)
-            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            terms_range = f"A{r}:H{r+4}"
+            ws.merge_cells(terms_range)
+            ws.cell(row=r, column=1, value=terms)
+            style_range(ws, terms_range, font=font_normal, alignment=Alignment(wrap_text=True, vertical='top'), border=border_all)
+            r += 6
             
-            r += 7
-            # Signatures
-            ws.cell(row=r, column=1, value=f"Prepared By: {self.made_by_var.get()}").font = Font(bold=True)
+            # 8. Signatures Block
+            ws.cell(row=r, column=1, value=f"Prepared By: {self.made_by_var.get()}")
+            style_range(ws, f"A{r}:A{r}", font=font_bold)
             
-            sig_approved = ws.cell(row=r, column=len(print_cols), value=f"Approved By: {self.approved_by_var.get()}")
-            sig_approved.font = Font(bold=True)
-            sig_approved.alignment = Alignment(horizontal='right')
+            ws.cell(row=r, column=8, value=f"Approved By: {self.approved_by_var.get()}")
+            style_range(ws, f"H{r}:H{r}", font=font_bold, alignment=Alignment(horizontal='right'))
             
-            # Auto-fit Column Widths with Smart Minimums
-            from openpyxl.utils import get_column_letter
-            for col in ws.columns:
-                max_len = 0
-                col_num = col[0].column
+            # 9. Smart Auto-fit Column Widths strictly for table structure to prevent stretch
+            col_widths = {
+                1: 20,  # S.No / Client labels (perfectly sized to prevent any Arial 10 Bold truncation)
+                2: 32,  # Description Part 1
+                3: 32,  # Description Part 2 (Specifications)
+                4: 10,  # UOM
+                5: 10,  # Qty
+                6: 16,  # Unit Rate / Right labels (perfectly sized to prevent any right-label truncation)
+                7: 18,  # Amount Excluding Tax
+                8: 18   # Total
+            }
+            
+            for col_num, w_val in col_widths.items():
                 col_letter = get_column_letter(col_num)
-                for cell in col:
-                    # Ignore merged logo headers (rows 1-5) and bottom notes to keep column scaling normal
-                    if cell.row < 6:
-                        continue
-                    if cell.value:
-                        val_str = str(cell.value)
-                        lines = val_str.split('\n')
-                        for line in lines:
-                            if len(line) > max_len:
-                                max_len = len(line)
-                
-                # Dynamic column width padding and index-based minimum overrides
-                min_w = 12
-                if col_num == 1: min_w = 8     # S.No
-                elif col_num == 2: min_w = 38  # Description (wider to fit content)
-                elif col_num == 3: min_w = 10  # UOM
-                elif col_num == 7: min_w = 26  # Tax / Totals Labels (prevents "Total Amc" cutting off)
-                elif col_num == 8: min_w = 18  # Total / Totals Values (prevents currency truncation)
-                
-                ws.column_dimensions[col_letter].width = max(max_len + 3, min_w)
+                ws.column_dimensions[col_letter].width = w_val
             
             wb.save(f)
             messagebox.showinfo("Success", f"Excel Saved: {f}")

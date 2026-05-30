@@ -44,6 +44,7 @@ class CommercialApp(QuotationApp):
 
         # 2) DB Init First
         self.init_database()
+        self.details_doc_no_var = tk.StringVar()
         
         # 3) Parent init
         super().__init__(root) 
@@ -60,7 +61,9 @@ class CommercialApp(QuotationApp):
         self.header_rows = [] 
         self.root.title("Commercial Invoice")
         self.doc_title_var.set("Commercial Invoice") 
-        self.quotation_no_var.set(self._get_next_ref("commercial_invoices", "CI-"))
+        next_ci = self._get_next_ref("commercial_invoices", "CI-")
+        self.quotation_no_var.set(next_ci)
+        self.details_doc_no_var.set(next_ci)
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
@@ -147,7 +150,6 @@ class CommercialApp(QuotationApp):
             print(f"Close warning: {e}")
         finally:
             try: self.root.destroy()
-            except: pass
             except: pass
 
     def _init_standard_header_rows(self):
@@ -260,7 +262,7 @@ class CommercialApp(QuotationApp):
                 tk.Label(lg, text=l2, font=("Arial", 9, "bold"), bg="white", anchor='w').grid(row=idx, column=2, sticky='nsew', padx=1, pady=1)
                 tk.Entry(lg, textvariable=v2, bd=1, relief="solid").grid(row=idx, column=3, sticky='nsew', padx=1, pady=1)
 
-        l_row(0, "Commercial Invoice No:", self.quotation_no_var, "PO No.", self.rfq_no_var)
+        l_row(0, "Commercial Invoice No:", self.details_doc_no_var, "PO No.", self.rfq_no_var)
         l_row(1, "Customer:", self.client_name_var, "S.T.N. NO:", self.client_stn_var)
         l_row(2, "Address:", self.client_addr_var, "NTN:", self.client_ntn_var)
         l_row(3, "Contact person:", self.client_contact_var, "Delivery date:", self.delivery_date_var)
@@ -729,26 +731,23 @@ class CommercialApp(QuotationApp):
             
             # Draw Social Media Icons on bottom left
             try:
-                icon_size = 0.3*inch
-                social_x = 20 
-                social_y = 25 
-                spacing = 0.05*inch
-                
+                icon_size = 16
+                social_x = MARGIN
+                social_y_start = 15
                 colors_list = [
                     ('#0066cc', 'W', 'https://www.orientmarketing.com.pk/'),
                     ('#FF0000', 'Y', 'https://www.youtube.com/@Antarc-Technologies'),
                     ('#1877F2', 'f', 'https://www.facebook.com/orientmarketing.com.pk'),
                     ('#E4405F', 'I', 'https://www.instagram.com/orientmarketinghvac/')
                 ]
-                
                 for idx, (color, symbol, url) in enumerate(colors_list):
-                    x_pos = social_x + idx * (icon_size + 4)
+                    y_pos = social_y_start + idx * (icon_size + 4)
                     canvas.setFillColor(color)
-                    canvas.rect(x_pos, social_y, icon_size, icon_size, fill=1, stroke=0)
+                    canvas.rect(social_x, y_pos, icon_size, icon_size, fill=1, stroke=0)
                     canvas.setFillColor(colors.white)
                     canvas.setFont("Helvetica-Bold", 10)
-                    canvas.drawString(x_pos + 4, social_y + 4, symbol)
-                    canvas.linkURL(url, (x_pos, social_y, x_pos + icon_size, social_y + icon_size), relative=0)
+                    canvas.drawString(social_x + 4, y_pos + 4, symbol)
+                    canvas.linkURL(url, (social_x, y_pos, social_x + icon_size, y_pos + icon_size), relative=0)
 
             except Exception as e:
                 print(f"Social icons error: {e}")
@@ -887,6 +886,7 @@ class CommercialApp(QuotationApp):
             full_data = json.dumps({
                 "header": {
                     "inv_no": self.quotation_no_var.get(), 
+                    "details_doc_no": self.details_doc_no_var.get(),
                     "client": self.client_name_var.get(),
                     "date": self.doc_date_var.get(),
                     "po_no": self.rfq_no_var.get(),

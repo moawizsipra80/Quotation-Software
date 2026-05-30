@@ -96,6 +96,7 @@ class DeliveryChallanApp(QuotationApp):
         self.f_logo_size_var = tk.DoubleVar(value=1.2)
         self.footer_align_var = tk.StringVar(value="Center") # Left, Center, Right
         self.footer_text_var = tk.StringVar()
+        self.details_doc_no_var = tk.StringVar()
         # 2) Parent init
         super().__init__(root) 
         
@@ -103,11 +104,11 @@ class DeliveryChallanApp(QuotationApp):
         self.auto_save_enabled.set(True)
         # 3) Invoice-specific overrides
         self.header_rows = [] 
-       
         self.doc_title_var.set("Delivery Chalan") 
         next_dc = self._get_next_ref("delivery_challans", "DC-")
         self.quotation_no_var.set(next_dc)
         self.dc_no_var.set(next_dc)
+        self.details_doc_no_var.set(next_dc)
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
@@ -272,19 +273,7 @@ class DeliveryChallanApp(QuotationApp):
         ttk.Button(btn_fr, text="💾 Save Invoice", command=self.save_to_database).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📊 Back to Dashboard", command=self.go_to_dashboard).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📂 Open Saved/History", command=self.open_history_hub).pack(side='left', padx=5)
-        # --- IMPORT SECTION ---
-        ttk.Label(btn_fr, text="| Load: ").pack(side='left', padx=(10, 2))
-        
-        # ✅ NEW BUTTON: Saved DCs dekhne ke liye
-        ttk.Button(btn_fr, text="📂 Load Saved DC", 
-                   command=lambda: self.open_import_dialog("delivery_challans")).pack(side='left', padx=2)
 
-        # Other Import Buttons
-        ttk.Button(btn_fr, text="📄 Commercial Inv", 
-                   command=lambda: self.open_import_dialog("commercial_invoices")).pack(side='left', padx=2)
-        ttk.Button(btn_fr, text="📑 Tax Inv", 
-                   command=lambda: self.open_import_dialog("tax_invoices")).pack(side='left', padx=2)
-        # ----------------------
         
 
         # ✅ FIXED: "Manage Header Rows" Button Restored
@@ -311,7 +300,7 @@ class DeliveryChallanApp(QuotationApp):
         # --- INVOICE NO & DATE ---
         meta_fr = ttk.Frame(top_grid)
         meta_fr.grid(row=0, column=2, sticky='e', padx=(10,0))
-        tk.Label(meta_fr, text="Invoice No:", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky='e', padx=5)
+        tk.Label(meta_fr, text="DC No:", font=("Arial", 9, "bold")).grid(row=0, column=0, sticky='e', padx=5)
         ttk.Entry(meta_fr, textvariable=self.quotation_no_var, width=15).grid(row=0, column=1, sticky='e')
         tk.Label(meta_fr, text="Date:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky='e', padx=5, pady=5)
         ttk.Entry(meta_fr, textvariable=self.doc_date_var, width=15).grid(row=1, column=1, sticky='e', pady=5)
@@ -346,7 +335,7 @@ class DeliveryChallanApp(QuotationApp):
                 tk.Label(lg, text=l2, font=("Arial", 9, "bold"), bg="white", anchor='w').grid(row=idx, column=2, sticky='nsew', padx=1, pady=1)
                 tk.Entry(lg, textvariable=v2, bd=1, relief="solid").grid(row=idx, column=3, sticky='nsew', padx=1, pady=1)
 
-        l_row(0, "Dc No:", self.quotation_no_var, "PO No.", self.rfq_no_var)
+        l_row(0, "Dc No:", self.details_doc_no_var, "PO No.", self.rfq_no_var)
         l_row(1, "Customer:", self.client_name_var, "S.T.N. NO:", self.client_stn_var)
         l_row(2, "Address:", self.client_addr_var, "NTN:", self.client_ntn_var)
         l_row(3, "Contact person:", self.client_contact_var, "Delivery date:", self.delivery_date_var)
@@ -1032,19 +1021,33 @@ class DeliveryChallanApp(QuotationApp):
                 qr_img.drawOn(canvas, qx, qy)
                 canvas.linkURL(qr_link, (qx, qy, qx+0.4*inch, qy+0.4*inch), relative=0)
             
-            # Social Links Logic...
-            social_links = [('#0066cc', 'W', 'https://www.orientmarketing.com.pk/'), ('#FF0000', 'Y', 'https://www.youtube.com/@Antarc-Technologies'), ('#1877F2', 'f', 'https://www.facebook.com/orientmarketing.com.pk'), ('#E4405F', 'I', 'https://www.instagram.com/orientmarketinghvac/')]
-            for idx, (color, sym, url) in enumerate(social_links):
-                x, y = MARGIN + idx*17, 15
-                canvas.setFillColor(color); canvas.rect(x, y, 12, 12, fill=1, stroke=0)
-                canvas.setFillColor(colors.white); canvas.setFont("Helvetica-Bold", 8); canvas.drawString(x+3, y+3, sym)
-                canvas.linkURL(url, (x, y, x+12, y+12), relative=0)
+            # Draw Social Media Icons on bottom left (Vertically stacked)
+            try:
+                icon_size = 16
+                social_x = MARGIN
+                social_y_start = 15
+                colors_list = [
+                    ('#0066cc', 'W', 'https://www.orientmarketing.com.pk/'),
+                    ('#FF0000', 'Y', 'https://www.youtube.com/@Antarc-Technologies'),
+                    ('#1877F2', 'f', 'https://www.facebook.com/orientmarketing.com.pk'),
+                    ('#E4405F', 'I', 'https://www.instagram.com/orientmarketinghvac/')
+                ]
+                for idx, (color, symbol, url) in enumerate(colors_list):
+                    y_pos = social_y_start + idx * (icon_size + 4)
+                    canvas.setFillColor(color)
+                    canvas.rect(social_x, y_pos, icon_size, icon_size, fill=1, stroke=0)
+                    canvas.setFillColor(colors.white)
+                    canvas.setFont("Helvetica-Bold", 10)
+                    canvas.drawString(social_x + 4, y_pos + 4, symbol)
+                    canvas.linkURL(url, (social_x, y_pos, social_x + icon_size, y_pos + icon_size), relative=0)
+            except Exception as e:
+                print(f"Social icons error: {e}")
 
             if footer_logo_obj:
                 w = footer_logo_obj.drawWidth
                 align = d['footer_align']
                 x_pos = (A4[0]-w)/2 if align == "Center" else (A4[0]-MARGIN-w if align == "Right" else MARGIN)
-                footer_logo_obj.drawOn(canvas, x_pos, 10)
+                footer_logo_obj.drawOn(canvas, x_pos, 15 if align == "Center" else 10)
             canvas.restoreState()
 
         doc.build(elements, onFirstPage=canvas_setup, onLaterPages=canvas_setup)
@@ -1060,7 +1063,8 @@ class DeliveryChallanApp(QuotationApp):
             "header": {
                 "ref_no": self.dc_no_var.get(), 
                 "date": self.doc_date_var.get(),
-                "client_name": self.client_name_var.get()
+                "client_name": self.client_name_var.get(),
+                "details_doc_no": self.details_doc_no_var.get()
             },
             "items": self.items_data
         }
