@@ -44,12 +44,11 @@ def style_sidebar_button(btn, active_color=ACCENT):
 
 def apply_treeview_style():
     """ 
-    Ye function zabardasti Table ko Dark banayega 
-    chahe poori app White (Lumen) kyun na ho.
+    this function makes the table into dark 
     """
     style = ttk.Style()
     
-    # Hum ek nayi style banayenge 'Dark.Treeview'
+    # 'Dark.Treeview'
     style.layout("Dark.Treeview", style.layout("Treeview")) # Layout copy
     
     style.configure("Dark.Treeview",

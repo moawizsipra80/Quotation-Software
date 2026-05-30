@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
-from commercial import CommercialApp  # Aapki commercial.py file
+from src.config import get_db_path
+from src.commercial import CommercialApp  # Aapki commercial.py file
 
 def open_commercial_hub(root_window):
     """Ye Commercial Invoices ka History/Converter Hub hai"""
@@ -46,7 +47,7 @@ def open_commercial_hub(root_window):
         for i in tree.get_children(): 
             tree.delete(i)
         try:
-            conn = sqlite3.connect("CommercialInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_invoices'")
             if cur.fetchone():
@@ -67,7 +68,7 @@ def open_commercial_hub(root_window):
             return
         inv_id = tree.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("CommercialInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM commercial_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
@@ -104,7 +105,7 @@ def open_commercial_hub(root_window):
     sb2.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("QuotationManager_Final.db")
+        conn = sqlite3.connect(get_db_path("QuotationManager_Final.db"))
         cur = conn.cursor()
         cur.execute("SELECT id, ref_no, client_name, grand_total FROM quotations ORDER BY id DESC")
         for row in cur.fetchall():
@@ -120,7 +121,7 @@ def open_commercial_hub(root_window):
             return
         q_id = tree2.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("QuotationManager_Final.db")
+            conn = sqlite3.connect(get_db_path("QuotationManager_Final.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM quotations WHERE id=?", (q_id,))
             row = cur.fetchone()
@@ -156,7 +157,7 @@ def open_commercial_hub(root_window):
     sb3.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("TaxInvoice_Manager.db")
+        conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
         if cur.fetchone():
@@ -174,7 +175,7 @@ def open_commercial_hub(root_window):
             return
         inv_id = tree3.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("TaxInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()

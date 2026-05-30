@@ -69,6 +69,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallDelete]
 ; Clean up auto-generated files on uninstall
-Type: files; Name: "{app}\*.db"
+Type: filesandordirs; Name: "{app}\db"
 Type: files; Name: "{app}\*.log"
 Type: dirifempty; Name: "{app}"

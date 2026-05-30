@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+import ttkbootstrap as ttk
+from tkinter import messagebox, filedialog
 # Matplotlib moved inside _draw_chart for fast startup
 FigureCanvasTkAgg = None
 plt = None
-import analytics
+from src.features import analytics
 import os
 import datetime
 import sqlite3
@@ -11,9 +12,9 @@ try:
     import pyodbc
 except ImportError:
     pyodbc = None
-import ui_styles as style  
+from src.components import ui_styles as style  
 import pywinstyles
-from theme_manager import ThemeManager
+from src.themes.theme_manager import ThemeManager
 import random
 from PIL import Image, ImageTk
 class DashboardPanel:
@@ -56,7 +57,7 @@ class DashboardPanel:
         try:
             # Pass current user for filtered analytics
             user = getattr(self.app, 'current_username', None)
-            from analytics import get_analytics_data
+            from src.features.analytics import get_analytics_data
             self.monthly_data = get_analytics_data(self.app.conn, user=user)
         except Exception as e:
             print(f"Error fetching monthly data: {e}")
@@ -67,7 +68,7 @@ class DashboardPanel:
     def launch_invoice_hub(self):
         try:
             self.app.root.withdraw()
-            from invoice_selector import open_invoice_hub
+            from src.components.invoice_selector import open_invoice_hub
             open_invoice_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Tax Invoice Manager: {e}")
@@ -76,7 +77,7 @@ class DashboardPanel:
     def launch_commercial_hub(self):
         try:
             self.app.root.withdraw()
-            from commercial_selector import open_commercial_hub
+            from src.components.commercial_selector import open_commercial_hub
             open_commercial_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Commercial Invoice Manager: {e}")
@@ -85,7 +86,7 @@ class DashboardPanel:
     def launch_dc_hub(self):
         try:
             self.app.root.withdraw()
-            from delivery_selector import open_dc_hub
+            from src.components.delivery_selector import open_dc_hub
             open_dc_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Delivery Challan Manager: {e}")
@@ -166,7 +167,7 @@ class DashboardPanel:
             sw.destroy() # Window band karein
             
             try:
-                import insta_scraper
+                from src.features import insta_scraper
                 import importlib
                 importlib.reload(insta_scraper)
                 
@@ -717,7 +718,7 @@ class DashboardPanel:
             try:
                 import matplotlib.pyplot as plt
                 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-                from analytics import get_analytics_data
+                from src.features.analytics import get_analytics_data
 
                 user = getattr(self.app, 'current_username', None)
                 df = get_analytics_data(self.app.conn, user=user)
@@ -789,7 +790,7 @@ class DashboardPanel:
         # 1. Style Load (Agar style file use kar rahay hain)
         
         try:
-            import ui_styles as style
+            from src.components import ui_styles as style
             style.apply_treeview_style()
             tree = ttk.Treeview(parent, columns=cols, show='headings', height=10, style="Dark.Treeview")
         except:
@@ -1636,7 +1637,7 @@ class DashboardPanel:
             status_lbl.config(text="Running Deep Scan... (This takes time)", fg="blue")
             sw.update()
             
-            import scrapper
+            from src.features import scrapper
             try:
                 # 3 cheezain bhej rahe hain
                 res = scrapper.find_clients(area, city, cat)
@@ -1731,7 +1732,7 @@ class DashboardPanel:
                 "Do not close Chrome manually.\n\nStart Campaign?")
             
             if ans:
-                import whatsapp_bot
+                from src.features import whatsapp_bot
                 sw.destroy()
                 try:
                     # File path ab bheja ja raha hai

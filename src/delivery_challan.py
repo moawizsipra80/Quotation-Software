@@ -1,5 +1,10 @@
+try:
+    from src import config
+except ImportError:
+    import config # 🚀 Register dynamic subfolder paths first
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import ttkbootstrap as ttk
+from tkinter import messagebox, filedialog
 import json
 import datetime
 # import sqlite3
@@ -10,8 +15,8 @@ from PIL import Image, ImageTk
 # ✅ Lazy Imports (Moved inside functions for speed)
 
 # Parent Class Import
-from quotation import QuotationApp 
-
+from src.quotation import QuotationApp 
+from src.config import get_db_path
 class DeliveryChallanApp(QuotationApp):
     def __init__(self, root, original_root=None, from_quotation_data=None):
         self.root = root 
@@ -216,7 +221,7 @@ class DeliveryChallanApp(QuotationApp):
         try:
             import sqlite3
             self.db_name = "DeliveryChallan_Manager.db"
-            self.conn = sqlite3.connect(self.db_name, timeout=30, check_same_thread=False)
+            self.conn = sqlite3.connect(get_db_path(self.db_name), timeout=30, check_same_thread=False)
             self.cursor = self.conn.cursor()
             # Ensure the table exists in this database
             self.cursor.execute("""
@@ -256,7 +261,7 @@ class DeliveryChallanApp(QuotationApp):
         orig_root = getattr(self, 'original_root', None)
         self.on_closing()
         if orig_root:
-            from delivery_selector import open_dc_hub
+            from src.components.delivery_selector import open_dc_hub
             orig_root.withdraw()
             open_dc_hub(orig_root)
 

@@ -1,3 +1,7 @@
+try:
+    from src import config
+except ImportError:
+    import config # 🚀 Register dynamic subfolder paths first
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog
 from PIL import Image, ImageTk
@@ -39,8 +43,9 @@ except Exception:
     pass
 
 
-import ui_styles as style
-from theme_manager import ThemeManager
+from src.components import ui_styles as style
+from src.themes.theme_manager import ThemeManager
+from src.config import get_db_path
 # Optional imports with safe handling
 docx = None
 try:
@@ -918,7 +923,7 @@ class QuotationApp:
             return
 
         self.db_name = "QuotationManager_Final.db"
-        self.conn = sqlite3.connect(self.db_name, timeout=30, check_same_thread=False)
+        self.conn = sqlite3.connect(get_db_path(self.db_name), timeout=30, check_same_thread=False)
         self.cursor = self.conn.cursor()
 
         # --- 1. BASIC TABLES SETUP ---
@@ -1005,7 +1010,7 @@ class QuotationApp:
             with tempfile.TemporaryDirectory() as tmpdir:
                 # 1. Database copy karein
                 db_copy = os.path.join(tmpdir, self.db_name)
-                shutil.copy2(self.db_name, db_copy)
+                shutil.copy2(get_db_path(self.db_name), db_copy)
                 
                 # 2. Assets gather karein (Logos, Profile Pics etc)
                 # Hum un files ko track kareinge jo external hain
@@ -1096,7 +1101,14 @@ class QuotationApp:
                 except: pass
                 
                 # Extract Everything (Database + Assets)
-                zipf.extractall(".")
+                target_db_path = get_db_path(self.db_name)
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    zipf.extract(self.db_name, tmpdir)
+                    shutil.move(os.path.join(tmpdir, self.db_name), target_db_path)
+                
+                for member in zipf.namelist():
+                    if member != self.db_name:
+                        zipf.extract(member, ".")
                 
                 # Re-init Connection & Schema
                 self.init_database()
@@ -1397,7 +1409,7 @@ class QuotationApp:
             
             try:
                 # Dynamic SQLite connection to correct decoupled file!
-                conn = sqlite3.connect(db_file)
+                conn = sqlite3.connect(get_db_path(db_file))
                 cur = conn.cursor()
                 
                 # Check columns existence (Safe-guard)
@@ -1448,7 +1460,7 @@ class QuotationApp:
             db_file = db_map.get(tbl, "QuotationManager_Final.db")
             
             try:
-                conn = sqlite3.connect(db_file)
+                conn = sqlite3.connect(get_db_path(db_file))
                 cur = conn.cursor()
                 cur.execute(f"SELECT full_data FROM {tbl} WHERE id=?", (db_id,))
                 row = cur.fetchone()
@@ -1490,7 +1502,7 @@ class QuotationApp:
                     ids_to_del.append(vals[1]) 
                 
                 if ids_to_del:
-                    conn = sqlite3.connect(db_file)
+                    conn = sqlite3.connect(get_db_path(db_file))
                     cur = conn.cursor()
                     placeholders = ','.join('?' for _ in ids_to_del)
                     cur.execute(f"DELETE FROM {tbl} WHERE id IN ({placeholders})", ids_to_del)
