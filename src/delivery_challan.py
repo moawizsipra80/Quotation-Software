@@ -37,10 +37,10 @@ class DeliveryChallanApp(QuotationApp):
         
         self.ref_quot_no_var = tk.StringVar() 
         self.dc_no_var = tk.StringVar()
-        self.vendor_stn_var = tk.StringVar()
-        self.vendor_ntn_var = tk.StringVar()
-        self.vendor_pra_var = tk.StringVar() 
-        self.vendor_email_var = tk.StringVar() 
+        self.vendor_stn_var = tk.StringVar(value="3277876189677")
+        self.vendor_ntn_var = tk.StringVar(value="3107475-8")
+        self.vendor_pra_var = tk.StringVar(value="P3107475-8") 
+        self.vendor_email_var = tk.StringVar(value="mafzalsipra@gmail.com") 
          
 
         # --- YAHAN PASTE KAREIN (Variables Section mein) ---
@@ -104,6 +104,7 @@ class DeliveryChallanApp(QuotationApp):
         self.details_doc_no_var = tk.StringVar()
         # 2) Parent init
         super().__init__(root) 
+        self.vendor_email_var.set("mafzalsipra@gmail.com")
         
         # Override some parent settings for Challan specific needs
         self.auto_save_enabled.set(True)
@@ -365,8 +366,7 @@ class DeliveryChallanApp(QuotationApp):
         r_row(2, "S.T.N. No.", self.vendor_stn_var)
         r_row(3, "NTN:", self.vendor_ntn_var)
         r_row(4, "PRA:", self.vendor_pra_var)
-        tk.Label(rg, text="email:", font=("Arial", 9, "bold"), bg="white", anchor='e').grid(row=5, column=0, sticky='nsew', padx=1, pady=1)
-        tk.Entry(rg, textvariable=self.vendor_email_var, bd=0, relief="flat", fg="blue", bg="white").grid(row=5, column=1, sticky='nsew', padx=1, pady=1)
+        r_row(5, "email:", self.vendor_email_var)
 
     def _build_bottom_section(self, parent):
         bot = ttk.Frame(parent, padding=10)
@@ -1150,7 +1150,7 @@ class DeliveryChallanApp(QuotationApp):
             elif table_name == "tax_invoices":
                 db_name = "TaxInvoice_Manager.db"
 
-            conn = sqlite3.connect(db_name)
+            conn = sqlite3.connect(get_db_path(db_name))
             cursor = conn.cursor()
             
             # All tables use 'ref_no' and 'date' columns consistently
@@ -1201,7 +1201,7 @@ class DeliveryChallanApp(QuotationApp):
             elif table_name == "tax_invoices":
                 db_name = "TaxInvoice_Manager.db"
 
-            conn = sqlite3.connect(db_name)
+            conn = sqlite3.connect(get_db_path(db_name))
             cursor = conn.cursor()
             
             # Query

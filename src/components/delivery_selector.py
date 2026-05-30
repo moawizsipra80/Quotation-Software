@@ -5,16 +5,27 @@ import sqlite3
 from src.config import get_db_path
 from src.delivery_challan import DeliveryChallanApp
 
+def set_centered_geometry(win, width_pct, height_pct, max_w, max_h):
+    screen_w = win.winfo_screenwidth()
+    screen_h = win.winfo_screenheight()
+    w = min(max_w, int(screen_w * width_pct))
+    h = min(max_h, int(screen_h * height_pct))
+    x = (screen_w - w) // 2
+    y = (screen_h - h) // 2
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
 def open_dc_hub(root_window):
     """Ye Delivery Challan ka History/Converter Hub hai"""
     
     # Popup Window
     hub = tk.Toplevel(root_window)
     hub.title("Delivery Challan Manager")
-    hub.geometry("900x650")
+    set_centered_geometry(hub, 0.75, 0.75, 950, 680)
     
     def on_hub_close():
         root_window.deiconify()
+        try: root_window.state('zoomed')
+        except: pass
         hub.destroy()
     hub.protocol("WM_DELETE_WINDOW", on_hub_close)
 
@@ -75,7 +86,7 @@ def open_dc_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
                 app = DeliveryChallanApp(new_win, original_root=root_window, from_quotation_data=row[0])
                 app.current_db_id = id_  # Existing ID for Update
@@ -128,7 +139,7 @@ def open_dc_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
                 DeliveryChallanApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
@@ -182,7 +193,7 @@ def open_dc_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
                 DeliveryChallanApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
@@ -236,7 +247,7 @@ def open_dc_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
                 DeliveryChallanApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
@@ -253,7 +264,7 @@ def open_dc_hub(root_window):
     def open_new():
         hub.destroy()
         new_win = tk.Toplevel(root_window)
-        new_win.geometry("1200x800")
+        set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
         new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
         DeliveryChallanApp(new_win, original_root=root_window)
 
@@ -264,6 +275,8 @@ def safe_close_dc(win):
     try:
         if win.master:
             win.master.deiconify()
+            try: win.master.state('zoomed')
+            except: pass
         print("✅ DC window closed cleanly")
     except:
         pass

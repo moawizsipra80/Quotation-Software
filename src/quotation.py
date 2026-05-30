@@ -1,7 +1,7 @@
 try:
     from src import config
 except ImportError:
-    import config # 🚀 Register dynamic subfolder paths first
+    import config 
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser, simpledialog
 from PIL import Image, ImageTk
@@ -30,7 +30,7 @@ import zipfile
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.widgets import ToastNotification
-import ttkbootstrap as tb # Keep tb as an alias for safety
+import ttkbootstrap as tb 
 import smtplib
 import ssl
 import random
@@ -412,7 +412,13 @@ class QuotationApp:
         self.check_license()
 
     def on_closing(self):
-        """Safely handle application shutdown"""
+        """Safely handle window closure or application shutdown"""
+        if getattr(self, 'current_dashboard', None) is None:
+            # The user is in the Quotation Creation screen! Go back to the Dashboard instead of exiting.
+            self.go_to_dashboard()
+            return
+            
+        # The user is on the Dashboard. Perform full shutdown.
         if not self.confirm_and_save_before_closing():
             return
             
@@ -1341,7 +1347,16 @@ class QuotationApp:
         # --- 1. WINDOW SETUP ---
         win = tk.Toplevel(self.root)
         win.title("Unified Document History Manager")
-        win.geometry("1100x700")
+        
+        # Responsive centered sizing
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        w = min(1200, int(screen_w * 0.8))
+        h = min(800, int(screen_h * 0.8))
+        x = (screen_w - w) // 2
+        y = (screen_h - h) // 2
+        win.geometry(f"{w}x{h}+{x}+{y}")
+        
         win.transient(self.root)
         
         # --- TOP CONTROLS ---
@@ -2135,7 +2150,7 @@ class QuotationApp:
         ttk.Combobox(r1, textvariable=self.currency_var, values=["PKR", "USD", "EUR", "GBP"], width=5, bootstyle="success").pack(side='left', padx=5)
         self.currency_var.trace('w', self.update_currency_symbol)
         
-        ttk.Label(r1, text="Global Tax %:", foreground="white").pack(side='left', padx=(10, 5))
+        ttk.Label(r1, text="GST %:", foreground="white").pack(side='left', padx=(10, 5))
         gst_e = ttk.Entry(r1, textvariable=self.gst_rate_var, width=6, bootstyle="warning")
         gst_e.pack(side='left')
         gst_e.bind('<FocusOut>', lambda e: self.recalc_all())
@@ -4748,9 +4763,12 @@ def start_app():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = ["splash_logo.png", "logo.png", "logo.jpg", "logo.jpeg", "logo.ico"]
     
+    from src.config import base_dir
     found_logo = None
     for c in candidates:
-        p = os.path.join(script_dir, c)
+        p = os.path.join(base_dir, c)
+        if not os.path.exists(p):
+            p = os.path.join(script_dir, c)
         if os.path.exists(p):
             found_logo = p
             break
@@ -4826,17 +4844,17 @@ def start_app():
         else:
             launch_actual_app()
 
-    # --- LAUNCH APP ---
     def launch_actual_app():
         try:
             app_logic = QuotationApp(root)
             splash.destroy()
-            root.deiconify()
-            try: root.state('zoomed') 
-            except: root.geometry("1200x800")
-            root.attributes('-topmost', False) 
-            root.lift()
-            root.focus_force()
+            # Main window remains withdrawn/hidden until successful login/setup.
+            
+            disclaimer_text = (
+                "The calculations provided by this software are for convenience purposes only. "
+                "Users are advised to independently verify all amounts and calculations before issuing, submitting, or relying on any document."
+            )
+            messagebox.showwarning("Important Disclaimer", disclaimer_text)
         except Exception as e:
             splash.destroy()
             messagebox.showerror("Error", f"Startup Failed: {e}")

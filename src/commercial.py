@@ -36,10 +36,13 @@ class CommercialApp(QuotationApp):
         
         self.ref_quot_no_var = tk.StringVar() 
         self.dc_no_var = tk.StringVar()
-        self.vendor_stn_var = tk.StringVar()
-        self.vendor_ntn_var = tk.StringVar()
-        self.vendor_pra_var = tk.StringVar() 
-        self.vendor_email_var = tk.StringVar() 
+        self.vendor_stn_var = tk.StringVar(value="3277876189677")
+        self.vendor_ntn_var = tk.StringVar(value="3107475-8")
+        self.vendor_pra_var = tk.StringVar(value="P3107475-8") 
+        self.vendor_email_var = tk.StringVar(value="mafzalsipra@gmail.com") 
+        self.wht_rate_var = tk.StringVar(value="5.5")
+        self.wht_total_var = tk.StringVar(value="0.00")
+        self.print_wht_var = tk.BooleanVar(value=True)
         self.root.state('zoomed') 
         self.root.lift()
         self.root.focus_force()
@@ -52,6 +55,7 @@ class CommercialApp(QuotationApp):
         
         # 3) Parent init
         super().__init__(root) 
+        self.vendor_email_var.set("mafzalsipra@gmail.com")
  
         # ✅ FIX: Explicitly enable Maximize/Minimize and ensure focus
         # Removed transient("") to avoid focus oddities
@@ -291,8 +295,7 @@ class CommercialApp(QuotationApp):
         r_row(2, "S.T.N. No.", self.vendor_stn_var)
         r_row(3, "NTN:", self.vendor_ntn_var)
         r_row(4, "PRA:", self.vendor_pra_var)
-        tk.Label(rg, text="email:", font=("Arial", 9, "bold"), bg="white", anchor='e').grid(row=5, column=0, sticky='nsew', padx=1, pady=1)
-        tk.Entry(rg, textvariable=self.vendor_email_var, bd=0, relief="flat", fg="blue", bg="white").grid(row=5, column=1, sticky='nsew', padx=1, pady=1)
+        r_row(5, "email:", self.vendor_email_var)
 
     # =========================================================
     #  4. BOTTOM SECTION
@@ -313,10 +316,17 @@ class CommercialApp(QuotationApp):
         ttk.Combobox(r1, textvariable=self.currency_var, values=["PKR", "USD", "EUR", "GBP"], width=5).pack(side='left', padx=5)
         self.currency_var.trace('w', self.update_currency_symbol)
         
-        ttk.Label(r1, text="Global Tax %:").pack(side='left', padx=(10, 5))
+        ttk.Label(r1, text="GST %:").pack(side='left', padx=(10, 5))
         gst_e = ttk.Entry(r1, textvariable=self.gst_rate_var, width=6)
         gst_e.pack(side='left')
         gst_e.bind('<FocusOut>', lambda e: self.recalc_all())
+        gst_e.bind('<KeyRelease>', lambda e: self.recalc_all())
+
+        ttk.Label(r1, text="WHT %:").pack(side='left', padx=(10, 5))
+        wht_e = ttk.Entry(r1, textvariable=self.wht_rate_var, width=6)
+        wht_e.pack(side='left')
+        wht_e.bind('<FocusOut>', lambda e: self.recalc_all())
+        wht_e.bind('<KeyRelease>', lambda e: self.recalc_all())
 
         # --- FINANCIAL SUMMARY ---
         ttk.Separator(col1, bootstyle="secondary").pack(fill='x', pady=10)
@@ -333,6 +343,7 @@ class CommercialApp(QuotationApp):
 
         add_sum_row(col1, "Sub Total:", self.subtotal_var, self.print_subtotal_var)
         add_sum_row(col1, "Total Tax:", self.tax_total_var, self.print_tax_var)
+        add_sum_row(col1, "Withholding Tax:", self.wht_total_var, self.print_wht_var)
         add_sum_row(col1, "Grand Total:", self.grand_total_var, self.print_grand_total_var, is_bold=True)
         
         # Extra Fields Container
@@ -399,6 +410,26 @@ class CommercialApp(QuotationApp):
             self.tax_lbl.config(text=f"Total Tax: {curr} {total_tax:,.2f}")
         if hasattr(self, 'total_lbl'):
             self.total_lbl.config(text=f"Net Amount: {curr} {net_total:,.2f}")
+
+        # Withholding Tax Calculation (5.5% default on GST inclusive amount)
+        try:
+            sub = float(self.subtotal_var.get().replace(",", ""))
+        except:
+            sub = 0.0
+        try:
+            tax = float(self.tax_total_var.get().replace(",", ""))
+        except:
+            tax = 0.0
+        
+        gst_inclusive_amount = sub + tax
+        
+        try:
+            wht_pct = float(self.wht_rate_var.get())
+        except:
+            wht_pct = 5.5
+            
+        wht_amt = gst_inclusive_amount * wht_pct / 100.0
+        self.wht_total_var.set(f"{wht_amt:,.2f}")
 
     # =========================================================
     #  5. PDF GENERATOR
@@ -624,6 +655,15 @@ class CommercialApp(QuotationApp):
             val = self.tax_total_var.get() if hasattr(self, 'tax_total_var') else "0.00"
             summary_data.append([
                 Paragraph("<b>Total Sales Tax:</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
+                Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
+            ])
+
+        # Withholding Tax
+        if hasattr(self, 'print_wht_var') and self.print_wht_var.get():
+            val = self.wht_total_var.get() if hasattr(self, 'wht_total_var') else "0.00"
+            pct = self.wht_rate_var.get() if hasattr(self, 'wht_rate_var') else "5.5"
+            summary_data.append([
+                Paragraph(f"<b>Withholding Tax ({pct}%):</b>", ParagraphStyle('SL', parent=norm_style, alignment=TA_RIGHT)),
                 Paragraph(f"<b>{curr} {val}</b>", ParagraphStyle('SV', parent=norm_style, alignment=TA_RIGHT))
             ])
             

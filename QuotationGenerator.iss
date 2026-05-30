@@ -4,7 +4,7 @@
 ; ============================================================
 
 #define MyAppName "Quotation Generator"
-#define MyAppVersion "2.0"
+#define MyAppVersion "5.2"
 #define MyAppPublisher "Orient Marketing"
 #define MyAppExeName "QuotationGenerator.exe"
 #define MyAppIcon "logo.ico"
