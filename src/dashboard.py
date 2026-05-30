@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+import ttkbootstrap as ttk
+from tkinter import messagebox, filedialog
 # Matplotlib moved inside _draw_chart for fast startup
 FigureCanvasTkAgg = None
 plt = None
-import analytics
+from src.features import analytics
 import os
 import datetime
 import sqlite3
@@ -11,9 +12,10 @@ try:
     import pyodbc
 except ImportError:
     pyodbc = None
-import ui_styles as style  
+from src.components import ui_styles as style  
 import pywinstyles
-from theme_manager import ThemeManager
+from src.themes.theme_manager import ThemeManager
+from src.config import get_db_path
 import random
 from PIL import Image, ImageTk
 class DashboardPanel:
@@ -56,7 +58,7 @@ class DashboardPanel:
         try:
             # Pass current user for filtered analytics
             user = getattr(self.app, 'current_username', None)
-            from analytics import get_analytics_data
+            from src.features.analytics import get_analytics_data
             self.monthly_data = get_analytics_data(self.app.conn, user=user)
         except Exception as e:
             print(f"Error fetching monthly data: {e}")
@@ -67,7 +69,7 @@ class DashboardPanel:
     def launch_invoice_hub(self):
         try:
             self.app.root.withdraw()
-            from invoice_selector import open_invoice_hub
+            from src.components.invoice_selector import open_invoice_hub
             open_invoice_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Tax Invoice Manager: {e}")
@@ -76,7 +78,7 @@ class DashboardPanel:
     def launch_commercial_hub(self):
         try:
             self.app.root.withdraw()
-            from commercial_selector import open_commercial_hub
+            from src.components.commercial_selector import open_commercial_hub
             open_commercial_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Commercial Invoice Manager: {e}")
@@ -85,7 +87,7 @@ class DashboardPanel:
     def launch_dc_hub(self):
         try:
             self.app.root.withdraw()
-            from delivery_selector import open_dc_hub
+            from src.components.delivery_selector import open_dc_hub
             open_dc_hub(self.app.root)
         except Exception as e:
             messagebox.showerror("Error", f"Could not launch Delivery Challan Manager: {e}")
@@ -166,7 +168,7 @@ class DashboardPanel:
             sw.destroy() # Window band karein
             
             try:
-                import insta_scraper
+                from src.features import insta_scraper
                 import importlib
                 importlib.reload(insta_scraper)
                 
@@ -446,7 +448,7 @@ class DashboardPanel:
             
             for tbl, db_file in db_tables.items():
                 try:
-                    conn = sqlite3.connect(db_file)
+                    conn = sqlite3.connect(get_db_path(db_file))
                     cursor = conn.cursor()
                     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (tbl,))
                     if cursor.fetchone():
@@ -610,6 +612,14 @@ class DashboardPanel:
         tk.Label(footer_frame, text="made by Muhammad Moawiz Sipra", bg="#2c3e50", fg="#bdc3c7", 
                  font=("Segoe UI", 7, "italic")).pack(side="left", padx=20)
         
+        # Right: Disclaimer
+        disclaimer_full = (
+            "The calculations provided by this software are for convenience purposes only. "
+            "Users are advised to independently verify all amounts and calculations before issuing, submitting, or relying on any document."
+        )
+        tk.Label(footer_frame, text=disclaimer_full, bg="#2c3e50", fg="#ff4d4d", 
+                 font=("Segoe UI", 7, "bold"), wraplength=450, justify="right").pack(side="right", padx=20)
+        
         # Center: ODM-ONLINE (Using place to center perfectly)
         tk.Label(footer_frame, text="ODM-ONLINE", bg="#2c3e50", fg="white", 
                  font=("Segoe UI", 10, "bold")).place(relx=0.5, rely=0.5, anchor="center")
@@ -717,7 +727,7 @@ class DashboardPanel:
             try:
                 import matplotlib.pyplot as plt
                 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-                from analytics import get_analytics_data
+                from src.features.analytics import get_analytics_data
 
                 user = getattr(self.app, 'current_username', None)
                 df = get_analytics_data(self.app.conn, user=user)
@@ -789,7 +799,7 @@ class DashboardPanel:
         # 1. Style Load (Agar style file use kar rahay hain)
         
         try:
-            import ui_styles as style
+            from src.components import ui_styles as style
             style.apply_treeview_style()
             tree = ttk.Treeview(parent, columns=cols, show='headings', height=10, style="Dark.Treeview")
         except:
@@ -1022,7 +1032,7 @@ class DashboardPanel:
 
                 # 2. Tax invoices
                 try:
-                    conn = sqlite3.connect("TaxInvoice_Manager.db")
+                    conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
                     cur = conn.cursor()
                     cur.execute(
                         "SELECT client_name, COUNT(*) FROM tax_invoices WHERE date LIKE ? GROUP BY client_name",
@@ -1037,7 +1047,7 @@ class DashboardPanel:
 
                 # 3. Commercial invoices
                 try:
-                    conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                    conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
                     cur = conn.cursor()
                     cur.execute(
                         "SELECT client_name, COUNT(*) FROM commercial_invoices WHERE date LIKE ? GROUP BY client_name",
@@ -1124,7 +1134,7 @@ class DashboardPanel:
                 
             # 2. Tax Invoices
             try:
-                conn = sqlite3.connect("TaxInvoice_Manager.db")
+                conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
                 cur = conn.cursor()
                 cur.execute("SELECT 'Tax Invoice', ref_no, date, grand_total FROM tax_invoices WHERE client_name=?", (client_name,))
                 rows.extend(cur.fetchall())
@@ -1134,7 +1144,7 @@ class DashboardPanel:
 
             # 3. Commercial Invoices
             try:
-                conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
                 cur = conn.cursor()
                 cur.execute("SELECT 'Comm Invoice', ref_no, date, grand_total FROM commercial_invoices WHERE client_name=?", (client_name,))
                 rows.extend(cur.fetchall())
@@ -1144,7 +1154,7 @@ class DashboardPanel:
 
             # 4. Delivery Challans
             try:
-                conn = sqlite3.connect("DeliveryChallan_Manager.db")
+                conn = sqlite3.connect(get_db_path("DeliveryChallan_Manager.db"))
                 cur = conn.cursor()
                 cur.execute("SELECT 'Deliv Challan', ref_no, date, grand_total FROM delivery_challans WHERE client_name=?", (client_name,))
                 rows.extend(cur.fetchall())
@@ -1231,7 +1241,7 @@ class DashboardPanel:
 
             # 2. Tax invoices
             try:
-                conn = sqlite3.connect("TaxInvoice_Manager.db")
+                conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT COUNT(*) FROM tax_invoices WHERE client_name=? AND date LIKE ?",
@@ -1245,7 +1255,7 @@ class DashboardPanel:
 
             # 3. Commercial invoices
             try:
-                conn = sqlite3.connect("CommercialInvoice_Manager.db")
+                conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT COUNT(*) FROM commercial_invoices WHERE client_name=? AND date LIKE ?",
@@ -1636,7 +1646,7 @@ class DashboardPanel:
             status_lbl.config(text="Running Deep Scan... (This takes time)", fg="blue")
             sw.update()
             
-            import scrapper
+            from src.features import scrapper
             try:
                 # 3 cheezain bhej rahe hain
                 res = scrapper.find_clients(area, city, cat)
@@ -1731,7 +1741,7 @@ class DashboardPanel:
                 "Do not close Chrome manually.\n\nStart Campaign?")
             
             if ans:
-                import whatsapp_bot
+                from src.features import whatsapp_bot
                 sw.destroy()
                 try:
                     # File path ab bheja ja raha hai

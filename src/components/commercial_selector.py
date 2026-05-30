@@ -1,7 +1,17 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
-from commercial import CommercialApp  # Aapki commercial.py file
+from src.config import get_db_path
+from src.commercial import CommercialApp  # Aapki commercial.py file
+
+def set_centered_geometry(win, width_pct, height_pct, max_w, max_h):
+    screen_w = win.winfo_screenwidth()
+    screen_h = win.winfo_screenheight()
+    w = min(max_w, int(screen_w * width_pct))
+    h = min(max_h, int(screen_h * height_pct))
+    x = (screen_w - w) // 2
+    y = (screen_h - h) // 2
+    win.geometry(f"{w}x{h}+{x}+{y}")
 
 def open_commercial_hub(root_window):
     """Ye Commercial Invoices ka History/Converter Hub hai"""
@@ -9,10 +19,12 @@ def open_commercial_hub(root_window):
     # Popup Window
     hub = tk.Toplevel(root_window)
     hub.title("Commercial Invoice Manager")
-    hub.geometry("900x650")
+    set_centered_geometry(hub, 0.75, 0.75, 950, 680)
     
     def on_hub_close():
         root_window.deiconify()
+        try: root_window.state('zoomed')
+        except: pass
         hub.destroy()
     hub.protocol("WM_DELETE_WINDOW", on_hub_close)
     
@@ -46,7 +58,7 @@ def open_commercial_hub(root_window):
         for i in tree.get_children(): 
             tree.delete(i)
         try:
-            conn = sqlite3.connect("CommercialInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_invoices'")
             if cur.fetchone():
@@ -67,7 +79,7 @@ def open_commercial_hub(root_window):
             return
         inv_id = tree.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("CommercialInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM commercial_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
@@ -75,7 +87,7 @@ def open_commercial_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
                 app = CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
                 app.current_db_id = inv_id  # Existing ID for Update
@@ -104,7 +116,7 @@ def open_commercial_hub(root_window):
     sb2.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("QuotationManager_Final.db")
+        conn = sqlite3.connect(get_db_path("QuotationManager_Final.db"))
         cur = conn.cursor()
         cur.execute("SELECT id, ref_no, client_name, grand_total FROM quotations ORDER BY id DESC")
         for row in cur.fetchall():
@@ -120,7 +132,7 @@ def open_commercial_hub(root_window):
             return
         q_id = tree2.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("QuotationManager_Final.db")
+            conn = sqlite3.connect(get_db_path("QuotationManager_Final.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM quotations WHERE id=?", (q_id,))
             row = cur.fetchone()
@@ -128,7 +140,7 @@ def open_commercial_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
                 CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
@@ -156,7 +168,7 @@ def open_commercial_hub(root_window):
     sb3.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect("TaxInvoice_Manager.db")
+        conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
         if cur.fetchone():
@@ -174,7 +186,7 @@ def open_commercial_hub(root_window):
             return
         inv_id = tree3.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect("TaxInvoice_Manager.db")
+            conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
             cur = conn.cursor()
             cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
@@ -182,7 +194,7 @@ def open_commercial_hub(root_window):
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
-                new_win.geometry("1200x800")
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
                 new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
                 CommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
@@ -197,7 +209,7 @@ def open_commercial_hub(root_window):
     def open_blank():
         hub.destroy()
         new_win = tk.Toplevel(root_window)
-        new_win.geometry("1200x800")
+        set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
         new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_commercial(new_win))
         CommercialApp(new_win, original_root=root_window)
 
@@ -208,6 +220,8 @@ def safe_close_commercial(win):
     try:
         if win.master:
             win.master.deiconify()
+            try: win.master.state('zoomed')
+            except: pass
         print("✅ Commercial window closed cleanly")
     except:
         pass

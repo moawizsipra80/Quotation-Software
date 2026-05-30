@@ -4,7 +4,7 @@
 ; ============================================================
 
 #define MyAppName "Quotation Generator"
-#define MyAppVersion "2.0"
+#define MyAppVersion "5.2"
 #define MyAppPublisher "Orient Marketing"
 #define MyAppExeName "QuotationGenerator.exe"
 #define MyAppIcon "logo.ico"
@@ -69,6 +69,6 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallDelete]
 ; Clean up auto-generated files on uninstall
-Type: files; Name: "{app}\*.db"
+Type: filesandordirs; Name: "{app}\db"
 Type: files; Name: "{app}\*.log"
 Type: dirifempty; Name: "{app}"

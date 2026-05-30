@@ -1,7 +1,8 @@
 import sqlite3
 import pandas as pd
+from config import get_db_path
 
-conn = sqlite3.connect("QuotationManager_Final.db")
+conn = sqlite3.connect(get_db_path("QuotationManager_Final.db"))
 cursor = conn.cursor()
 
 tables = ["quotations", "tax_invoices", "commercial_invoices", "delivery_challans"]

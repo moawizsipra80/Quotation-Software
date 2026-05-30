@@ -28,8 +28,9 @@ def get_analytics_data(conn, user=None):
         
         for table, (label, db_file) in config.items():
             try:
+                from src.config import get_db_path
                 # Establish temporary connection to the separate database file
-                temp_conn = sqlite3.connect(db_file)
+                temp_conn = sqlite3.connect(get_db_path(db_file))
                 temp_cursor = temp_conn.cursor()
                 
                 # Check if table exists
