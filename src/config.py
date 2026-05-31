@@ -22,7 +22,15 @@ def get_db_path(db_name):
     Resolves the absolute path to a database file.
     Supports both frozen (executable) and development environments.
     """
-    db_dir = os.path.join(base_dir, "db")
+    import platform
+    if platform.system() == 'Windows':
+        db_dir = os.path.join(base_dir, "db")
+    else:
+        # On macOS and Linux, store the database in the user's home directory
+        # to bypass Gatekeeper's read-only translocation and permission sandbox.
+        home = os.path.expanduser("~")
+        db_dir = os.path.join(home, ".quotation_manager", "db")
+
     if not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
         
