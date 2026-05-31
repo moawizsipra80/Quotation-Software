@@ -34,9 +34,8 @@ import ttkbootstrap as tb
 import smtplib
 import ssl
 import random
-from ctypes import windll
-
 try:
+    from ctypes import windll
     # Fix for high DPI screens on Windows
     windll.shcore.SetProcessDpiAwareness(1)
 except Exception:

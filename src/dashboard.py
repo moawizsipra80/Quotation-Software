@@ -13,7 +13,10 @@ try:
 except ImportError:
     pyodbc = None
 from src.components import ui_styles as style  
-import pywinstyles
+try:
+    import pywinstyles
+except ImportError:
+    pywinstyles = None
 from src.themes.theme_manager import ThemeManager
 from src.config import get_db_path
 import random
