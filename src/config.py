@@ -36,6 +36,18 @@ def get_db_path(db_name):
         
     return os.path.join(db_dir, db_name)
 
+def get_appdata_dir():
+    """
+    Returns a cross-platform directory for storing application data/configurations.
+    Falls back to the user home directory on macOS/Linux.
+    """
+    import platform
+    if platform.system() == 'Windows':
+        appdata = os.getenv('APPDATA')
+        if appdata:
+            return appdata
+    return os.path.expanduser("~")
+
 # 🚀 Dynamic Search Path Registration
 # Appends all structured directories under src/ to sys.path so imports work perfectly
 src_dir = os.path.join(base_dir, "src")
