@@ -44,7 +44,7 @@ except Exception:
 
 from src.components import ui_styles as style
 from src.themes.theme_manager import ThemeManager
-from src.config import get_db_path
+from src.config import get_db_path, get_appdata_dir
 # Optional imports with safe handling
 docx = None
 try:
@@ -189,7 +189,7 @@ class QuotationApp:
         opts_frame.pack(fill='x', pady=20)
 
         self.remember_me_var = tk.BooleanVar(value=False)
-        rem_file = os.path.join(os.getenv('APPDATA'), "odm_remember.json")
+        rem_file = os.path.join(get_appdata_dir(), "odm_remember.json")
 
         cb = tk.Checkbutton(opts_frame, text="Remember Me", variable=self.remember_me_var, 
                             bg=CARD_BG, fg=TEXT_GREY, selectcolor=BG_COLOR, activebackground=CARD_BG, activeforeground=TEXT_WHITE, font=("Segoe UI", 9))
@@ -246,7 +246,7 @@ class QuotationApp:
         btn_login.bind("<Leave>", on_leave)
 
         # 7. FOOTER ACTIONS (Trial & Setup)
-        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
         if not os.path.exists(license_path):
             count = self.get_trial_count()
             rem = 2 - count
@@ -466,7 +466,7 @@ class QuotationApp:
 
     def get_sys_config_db(self):
         """Hidden location for trial/sec config"""
-        path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+        path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen")
         if not os.path.exists(path): os.makedirs(path)
         return os.path.join(path, "sys_config.db")
 
@@ -517,7 +517,7 @@ class QuotationApp:
         """Entry point for licensing: Checks if activated, else shows Options"""
         self.init_sys_config()
         
-        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
         machine_id = self.get_machine_id()
         
         if os.path.exists(license_path):
@@ -701,7 +701,7 @@ class QuotationApp:
                 formatted_key = f"{key[0:4]}-{key[4:8]}-{key[8:12]}-{key[12:16]}"
                 
                 try:
-                    license_dir = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+                    license_dir = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen")
                     if not os.path.exists(license_dir): os.makedirs(license_dir)
                     with open(os.path.join(license_dir, "license.key"), "w") as f:
                         f.write(formatted_key)
@@ -990,13 +990,16 @@ class QuotationApp:
         
         print("✅ Database Connected & Schema Synchronized (Errors Fixed)")
     def backup_database(self, auto=False):
-        """Creates a Universal ZIP Backup including Database and All Assets (Logos, Pics)"""
+        """Creates a Universal ZIP Backup including All Databases and All Assets (Logos, Pics)"""
         try:
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
             filename = f"Full_Backup_{timestamp}.zip"
             
             if auto:
-                backup_dir = r"C:\Quotation_Backups"
+                # Cross-platform safe auto-backup path:
+                # We save auto-backups inside the user home folder to ensure write permissions across Windows and Mac.
+                home = os.path.expanduser("~")
+                backup_dir = os.path.join(home, "Quotation_Backups")
                 if not os.path.exists(backup_dir):
                     os.makedirs(backup_dir)
                 file_path = os.path.join(backup_dir, filename)
@@ -1009,32 +1012,42 @@ class QuotationApp:
             
             if not file_path: return
             
-            self.conn.commit()
+            # Commit any pending changes
+            try:
+                self.conn.commit()
+            except: pass
             
-            # Temporary directory create karein assets gather karne ke liye
+            # Close main connection safely before backing up to avoid locks
+            try:
+                self.conn.close()
+            except: pass
+
+            db_files = [
+                "QuotationManager_Final.db",
+                "TaxInvoice_Manager.db",
+                "CommercialInvoice_Manager.db",
+                "DeliveryChallan_Manager.db"
+            ]
+            
+            # Temporary directory to gather assets
             with tempfile.TemporaryDirectory() as tmpdir:
-                # 1. Database copy karein
-                db_copy = os.path.join(tmpdir, self.db_name)
-                shutil.copy2(get_db_path(self.db_name), db_copy)
-                
-                # 2. Assets gather karein (Logos, Profile Pics etc)
-                # Hum un files ko track kareinge jo external hain
-                assets_dir = os.path.join(tmpdir, "assets")
-                if not os.path.exists(assets_dir):
-                    os.makedirs(assets_dir)
-                
-                # Sab paths ka map banayenge taake restore pe paths fix ho sakein
                 with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    # 1. Database add karein
-                    zipf.write(db_copy, arcname=self.db_name)
+                    # 1. Back up all active database files
+                    for db_file in db_files:
+                        db_path = get_db_path(db_file)
+                        if os.path.exists(db_path):
+                            db_copy = os.path.join(tmpdir, db_file)
+                            shutil.copy2(db_path, db_copy)
+                            zipf.write(db_copy, arcname=db_file)
                     
-                    # 2. Assets folder add karein (agar maujood ho)
-                    # Is mein profile pics, logos waghaira ho saktay hain
-                    # (Assuming assets logic is implemented elsewhere or handled here)
+                    # 2. Assets folder add
                     if os.path.exists("assets"):
                         for root, dirs, files in os.walk("assets"):
                             for file in files:
                                 zipf.write(os.path.join(root, file))
+                
+                # Re-initialize connection
+                self.init_database()
                 
                 if auto:
                     print(f"✅ Auto-Backup Completed: {file_path}")
@@ -1042,6 +1055,8 @@ class QuotationApp:
                     messagebox.showinfo("Success", f"Universal Backup Created!\n\nLocation: {file_path}")
                 
         except Exception as e:
+            # Safe recovery: ensure database connection is re-established
+            self.init_database()
             if not auto:
                 messagebox.showerror("Backup Error", f"Failed: {e}")
             else:
@@ -1095,25 +1110,44 @@ class QuotationApp:
             if not file_path: return
 
             with zipfile.ZipFile(file_path, 'r') as zipf:
-                # Arcnames check karein
+                # Arcnames check (main database must exist)
                 if self.db_name not in zipf.namelist():
                     messagebox.showerror("Error", "Invalid Backup File: Database not found inside.")
                     return
                 
-                # Close current connection safely
+                # Close current connection safely before restoring
                 try:
                     self.conn.close()
                 except: pass
                 
-                # Extract Everything (Database + Assets)
-                target_db_path = get_db_path(self.db_name)
+                # Safe Multi-DB Restoration (extracts and replaces all found .db files)
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    zipf.extract(self.db_name, tmpdir)
-                    shutil.move(os.path.join(tmpdir, self.db_name), target_db_path)
+                    db_files_in_zip = [name for name in zipf.namelist() if name.endswith(".db")]
+                    for db_file in db_files_in_zip:
+                        try:
+                            zipf.extract(db_file, tmpdir)
+                            extracted_db = os.path.join(tmpdir, db_file)
+                            target_db_path = get_db_path(db_file)
+                            
+                            # Safely delete existing file first to bypass windows/mac filesystem locks
+                            if os.path.exists(target_db_path):
+                                try:
+                                    os.remove(target_db_path)
+                                except Exception as del_err:
+                                    print(f"Could not remove locked database {db_file}: {del_err}")
+                            
+                            # Copy the extracted DB file to target path
+                            shutil.copy2(extracted_db, target_db_path)
+                        except Exception as file_err:
+                            print(f"Error restoring DB file {db_file}: {file_err}")
                 
+                # Extract non-db assets safely
                 for member in zipf.namelist():
-                    if member != self.db_name:
-                        zipf.extract(member, ".")
+                    if not member.endswith(".db"):
+                        try:
+                            zipf.extract(member, ".")
+                        except Exception as ext_err:
+                            print(f"Could not extract asset {member}: {ext_err}")
                 
                 # Re-init Connection & Schema
                 self.init_database()
@@ -1212,7 +1246,7 @@ class QuotationApp:
 
         try:
             # --- TRIAL LIMIT CHECK ---
-            license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+            license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
             if not os.path.exists(license_path):
                 # We are in trial mode
                 current_quotes = self.get_trial_count()
