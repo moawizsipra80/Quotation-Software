@@ -44,7 +44,7 @@ except Exception:
 
 from src.components import ui_styles as style
 from src.themes.theme_manager import ThemeManager
-from src.config import get_db_path
+from src.config import get_db_path, get_appdata_dir
 # Optional imports with safe handling
 docx = None
 try:
@@ -189,7 +189,7 @@ class QuotationApp:
         opts_frame.pack(fill='x', pady=20)
 
         self.remember_me_var = tk.BooleanVar(value=False)
-        rem_file = os.path.join(os.getenv('APPDATA'), "odm_remember.json")
+        rem_file = os.path.join(get_appdata_dir(), "odm_remember.json")
 
         cb = tk.Checkbutton(opts_frame, text="Remember Me", variable=self.remember_me_var, 
                             bg=CARD_BG, fg=TEXT_GREY, selectcolor=BG_COLOR, activebackground=CARD_BG, activeforeground=TEXT_WHITE, font=("Segoe UI", 9))
@@ -246,7 +246,7 @@ class QuotationApp:
         btn_login.bind("<Leave>", on_leave)
 
         # 7. FOOTER ACTIONS (Trial & Setup)
-        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
         if not os.path.exists(license_path):
             count = self.get_trial_count()
             rem = 2 - count
@@ -466,7 +466,7 @@ class QuotationApp:
 
     def get_sys_config_db(self):
         """Hidden location for trial/sec config"""
-        path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+        path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen")
         if not os.path.exists(path): os.makedirs(path)
         return os.path.join(path, "sys_config.db")
 
@@ -517,7 +517,7 @@ class QuotationApp:
         """Entry point for licensing: Checks if activated, else shows Options"""
         self.init_sys_config()
         
-        license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+        license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
         machine_id = self.get_machine_id()
         
         if os.path.exists(license_path):
@@ -701,7 +701,7 @@ class QuotationApp:
                 formatted_key = f"{key[0:4]}-{key[4:8]}-{key[8:12]}-{key[12:16]}"
                 
                 try:
-                    license_dir = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen")
+                    license_dir = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen")
                     if not os.path.exists(license_dir): os.makedirs(license_dir)
                     with open(os.path.join(license_dir, "license.key"), "w") as f:
                         f.write(formatted_key)
@@ -1212,7 +1212,7 @@ class QuotationApp:
 
         try:
             # --- TRIAL LIMIT CHECK ---
-            license_path = os.path.join(os.getenv('APPDATA'), "ODM_Quotation_Gen", "license.key")
+            license_path = os.path.join(get_appdata_dir(), "ODM_Quotation_Gen", "license.key")
             if not os.path.exists(license_path):
                 # We are in trial mode
                 current_quotes = self.get_trial_count()
