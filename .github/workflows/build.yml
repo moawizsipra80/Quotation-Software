@@ -98,12 +98,13 @@ jobs:
           path: QuotationGenerator-macOS.zip
 
   create-release:
-    name: Create GitHub Release
+    name: Publish Public Release Assets
     needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      contents: write
+      actions: read
+      contents: read
     steps:
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
@@ -117,11 +118,34 @@ jobs:
           name: QuotationGenerator-macOS-Portable
           path: ./artifacts
 
-      - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ./artifacts/QuotationGenerator_Setup_v5.2.exe
-            ./artifacts/QuotationGenerator-macOS.zip
+      - name: Validate publishing configuration
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLIC_DOWNLOADS_REPO: ${{ vars.PUBLIC_DOWNLOADS_REPO }}
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          if [ -z "$PUBLIC_DOWNLOADS_REPO" ]; then
+            echo "::error::Missing repository variable PUBLIC_DOWNLOADS_REPO (format: owner/repo)."
+            exit 1
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Missing secret PUBLIC_REPO_TOKEN."
+            exit 1
+          fi
+
+      - name: Create or update release in public downloads repository
+        env:
+          PUBLIC_DOWNLOADS_REPO: ${{ vars.PUBLIC_DOWNLOADS_REPO }}
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" --repo "$PUBLIC_DOWNLOADS_REPO" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --repo "$PUBLIC_DOWNLOADS_REPO" \
+              --title "Quotation Generator $TAG" \
+              --notes "Automated binaries published from private source repository."
+
+          gh release upload "$TAG" \
+            ./artifacts/QuotationGenerator_Setup_v5.2.exe \
+            ./artifacts/QuotationGenerator-macOS.zip \
+            --repo "$PUBLIC_DOWNLOADS_REPO" \
+            --clobber
