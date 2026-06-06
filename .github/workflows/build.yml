@@ -75,6 +75,12 @@ jobs:
             --icon="logo.jpeg" \
             --add-data="templates:templates" \
             --add-data="logo.jpeg:." \
+            --paths="src" \
+            --paths="src/components" \
+            --paths="src/features" \
+            --paths="src/themes" \
+            --paths="src/models" \
+            --paths="src/utils" \
             --hidden-import="PIL.ImageTk" \
             --hidden-import="PIL.Image" \
             --hidden-import="openpyxl" \
@@ -84,12 +90,37 @@ jobs:
             --hidden-import="docx" \
             --hidden-import="matplotlib" \
             --hidden-import="pandas" \
+            --hidden-import="config" \
+            --hidden-import="dashboard" \
+            --hidden-import="invoice" \
+            --hidden-import="commercial" \
+            --hidden-import="delivery_challan" \
+            --hidden-import="analytics" \
+            --hidden-import="generator" \
+            --hidden-import="scrapper" \
+            --hidden-import="whatsapp_bot" \
+            --hidden-import="insta_scraper" \
+            --hidden-import="ui_styles" \
+            --hidden-import="theme_manager" \
+            --hidden-import="invoice_selector" \
+            --hidden-import="commercial_selector" \
+            --hidden-import="delivery_selector" \
             src/quotation.py
+
+      - name: Ad-hoc Code Sign App Bundle
+        run: |
+          # Unsigned bundles are killed on Apple Silicon and flagged by Gatekeeper.
+          # An ad-hoc signature (-s -) makes the binary valid without a paid Developer ID.
+          codesign --force --deep --sign - dist/QuotationGenerator.app
+          codesign --verify --verbose dist/QuotationGenerator.app
 
       - name: Compress macOS Application into ZIP
         run: |
-          cd dist
-          zip -r ../QuotationGenerator-macOS.zip QuotationGenerator.app
+          # Use ditto (Apple's archiver), NOT `zip`. ditto preserves the bundle's
+          # internal symlinks, executable permission bit, and resource forks.
+          # Plain `zip` + Archive Utility corrupts the bundle -> "can't be opened".
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/QuotationGenerator.app QuotationGenerator-macOS.zip
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4

@@ -1020,6 +1020,8 @@ class QuotationApp:
             # Close main connection safely before backing up to avoid locks
             try:
                 self.conn.close()
+                self.conn = None
+                self.cursor = None
             except: pass
 
             db_files = [
@@ -1118,6 +1120,8 @@ class QuotationApp:
                 # Close current connection safely before restoring
                 try:
                     self.conn.close()
+                    self.conn = None
+                    self.cursor = None
                 except: pass
                 
                 # Safe Multi-DB Restoration (extracts and replaces all found .db files)
