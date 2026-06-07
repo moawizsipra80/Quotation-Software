@@ -24,7 +24,7 @@ class InvoiceApp(QuotationApp):
         self.root = root
         self.original_root = original_root
         self.is_invoice_window = True 
-        self.root.state('zoomed') 
+        config.maximize(self.root)
         self.root.lift()
         self.root.focus_force() 
         # 1) Invoice Specific Vars

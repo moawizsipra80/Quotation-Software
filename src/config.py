@@ -48,6 +48,30 @@ def get_appdata_dir():
             return appdata
     return os.path.expanduser("~")
 
+def maximize(win):
+    """Maximize a Tk window in a cross-platform way.
+
+    `state('zoomed')` is only valid on Windows (and some Linux builds). On macOS
+    (Aqua/Tk) it can raise TclError ("bad argument 'zoomed'"), which would crash
+    the app. Fall back to the Linux '-zoomed' attribute and finally to sizing the
+    window to fill the screen, so a window is always maximized and never crashes.
+    """
+    try:
+        win.state('zoomed')
+        return
+    except Exception:
+        pass
+    try:
+        win.attributes('-zoomed', True)
+        return
+    except Exception:
+        pass
+    try:
+        win.update_idletasks()
+        win.geometry(f"{win.winfo_screenwidth()}x{win.winfo_screenheight()}+0+0")
+    except Exception:
+        pass
+
 # 🚀 Dynamic Search Path Registration
 # Appends all structured directories under src/ to sys.path so imports work perfectly
 src_dir = os.path.join(base_dir, "src")
