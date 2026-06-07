@@ -43,7 +43,7 @@ class CommercialApp(QuotationApp):
         self.wht_rate_var = tk.StringVar(value="5.5")
         self.wht_total_var = tk.StringVar(value="0.00")
         self.print_wht_var = tk.BooleanVar(value=True)
-        self.root.state('zoomed') 
+        config.maximize(self.root)
         self.root.lift()
         self.root.focus_force()
         # Logo Paths
