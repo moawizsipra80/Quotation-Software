@@ -125,7 +125,7 @@ class QuotationApp:
         # --- NEW PROFESSIONAL LOGIN DESIGN ---
         login_win = tk.Toplevel(self.root)
         login_win.title("ODM Secure Login")
-        login_win.state('zoomed')
+        config.maximize(login_win)
         login_win.protocol("WM_DELETE_WINDOW", lambda: sys.exit())
 
         # Colors (Matching Splash)
@@ -221,9 +221,16 @@ class QuotationApp:
             btn_login.config(text="VERIFYING...", state='disabled')
             login_win.update()
 
-            self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-            row = self.cursor.fetchone()
-            
+            try:
+                self.cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+                row = self.cursor.fetchone()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                btn_login.config(text="LOGIN", state='normal')
+                messagebox.showerror("Login Error", f"Could not verify login:\n{e}", parent=login_win)
+                return
+
             if row:
                 try:
                     if self.remember_me_var.get():
@@ -231,13 +238,17 @@ class QuotationApp:
                     elif os.path.exists(rem_file):
                         os.remove(rem_file)
                 except: pass
-                
-                login_win.destroy()
-                self.perform_login(row)
+
+                try:
+                    login_win.destroy()
+                    self.perform_login(row)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    messagebox.showerror("Login Error", f"Login succeeded but the app failed to open:\n{e}")
             else:
                 btn_login.config(text="LOGIN", state='normal')
                 messagebox.showerror("Login Failed", "Invalid Username or Password", parent=login_win)
-                btn_login.config(text="LOGIN", state='normal')
 
         btn_login = tk.Button(card, text="LOGIN", font=("Segoe UI", 12, "bold"), bg=ACCENT_COLOR, fg=BG_COLOR, 
                               relief='flat', cursor="hand2", command=try_login)
@@ -460,7 +471,17 @@ class QuotationApp:
         except: pass
 
         # Method 3: Final Fallback
-        res = "PC-ID-" + hashlib.md5(os.getlogin().encode()).hexdigest()[:10]
+        # os.getlogin() can raise OSError on macOS when launched from Finder/launchd
+        # (no controlling terminal), so use getpass.getuser() which is safe there.
+        try:
+            user = os.getlogin()
+        except Exception:
+            import getpass
+            try:
+                user = getpass.getuser()
+            except Exception:
+                user = "default-user"
+        res = "PC-ID-" + hashlib.md5(user.encode()).hexdigest()[:10]
         QuotationApp._cached_machine_id = res
         return res
 
@@ -624,7 +645,7 @@ class QuotationApp:
         self.current_otp = str(random.randint(100000, 999999))
         
         tk.Label(scrollable_content, text="Step 2: Gmail Identity Check", font=("Segoe UI", 15, "bold"), bg="#1a1a1a", fg="white").pack(pady=(20, 10))
-        tk.Label(scrollable_content, text="Enter your Gmail credentials to receive OTP\n(Software will use this to send you the code)", 
+        tk.Label(scrollable_content, text="Enter your Gmail credentials to request activation.\nYour request is sent to the administrator, who will give you the code.",
                  bg="#1a1a1a", fg="#bdc3c7", font=("Arial", 9)).pack(pady=5)
         
         # Email Field
@@ -638,13 +659,15 @@ class QuotationApp:
         pass_ent.pack(pady=5)
         tk.Label(scrollable_content, text="Note: Use 'App Password' from Google Security settings.", font=("Arial", 8), fg="#7f8c8d", bg="#1a1a1a").pack()
 
-        otp_label = tk.Label(scrollable_content, text="Enter 6-Digit OTP Received:", bg="#1a1a1a", fg="#27ae60", font=("bold", 11))
+        otp_label = tk.Label(scrollable_content, text="Enter 6-Digit Code from Administrator:", bg="#1a1a1a", fg="#27ae60", font=("bold", 11))
         otp_ent = ttk.Entry(scrollable_content, width=20, justify='center', font=("Arial", 12, "bold"))
         
         def send_otp_email():
             user_mail = email_ent.get().strip()
-            user_pass = pass_ent.get().strip()
-            
+            # Google shows App Passwords as "abcd efgh ijkl mnop"; users paste the
+            # spaces too, which makes the SMTP login fail. Strip all whitespace.
+            user_pass = "".join(pass_ent.get().split())
+
             if not user_mail or not user_pass:
                 messagebox.showerror("Error", "Both Gmail and App Password are required!", parent=win)
                 return
@@ -654,41 +677,90 @@ class QuotationApp:
             win.update_idletasks()
             
             print(f"DEBUG: Attempting SMTP Login for {user_mail}...")
-            
-            try:
-                from email.message import EmailMessage
-                msg = EmailMessage()
-                msg.set_content(f"Your ODM Quotation System OTP is: {self.current_otp}\n\nUse this to activate your full license for this PC.")
-                msg['Subject'] = "ODM System Verification OTP"
-                msg['From'] = user_mail
-                msg['To'] = user_mail
 
-                context = ssl.create_default_context()
-                # 10 second timeout for SMTP
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
-                    server.login(user_mail, user_pass)
-                    server.send_message(msg)
-                
-                messagebox.showinfo("OTP Sent", f"Verification Code has been sent to {user_mail}\nPlease check your inbox/spam.", parent=win)
-                
+            from email.message import EmailMessage
+            # The verification code goes to the administrators, who then relay it
+            # to the user. This keeps activation under admin control.
+            ADMIN_EMAILS = ["mafzalsipra@gmail.com", "mmoawizsipra@gmail.com"]
+            machine_id = self.get_machine_id()
+            msg = EmailMessage()
+            msg.set_content(
+                "New ODM Quotation System activation request.\n\n"
+                f"Activation Code: {self.current_otp}\n\n"
+                f"Requested by (Gmail): {user_mail}\n"
+                f"Machine ID: {machine_id}\n\n"
+                "Share this code with the user only after you have verified them."
+            )
+            msg['Subject'] = f"ODM Activation Request - {user_mail}"
+            msg['From'] = user_mail
+            msg['To'] = ", ".join(ADMIN_EMAILS)
+
+            context = ssl.create_default_context()
+            last_error = None
+
+            # Try SSL on 465 first, then STARTTLS on 587 in case the network/ISP
+            # blocks port 465. A wrong App Password (auth error) is final, so we
+            # don't retry the other port in that case.
+            for mode in ("ssl", "starttls"):
+                try:
+                    if mode == "ssl":
+                        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=20) as server:
+                            server.login(user_mail, user_pass)
+                            server.send_message(msg)
+                    else:
+                        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
+                            server.ehlo()
+                            server.starttls(context=context)
+                            server.ehlo()
+                            server.login(user_mail, user_pass)
+                            server.send_message(msg)
+                    last_error = None
+                    break
+                except smtplib.SMTPAuthenticationError as e:
+                    last_error = e
+                    break
+                except Exception as e:
+                    last_error = e
+                    continue
+
+            if last_error is None:
+                messagebox.showinfo(
+                    "Request Sent",
+                    "Your activation request has been sent to the administrator.\n\n"
+                    "Please contact the administrator to receive your 6-digit "
+                    "activation code, then enter it below.",
+                    parent=win)
+
                 # Show OTP Fields
                 otp_label.pack(pady=(25, 5))
                 otp_ent.pack(pady=5)
-                send_btn.config(text="Resend Code", state='normal', bootstyle="secondary-outline")
+                send_btn.config(text="Resend Request", state='normal', bootstyle="secondary-outline")
                 verify_btn.pack(pady=20)
-                
-            except Exception as e:
-                print(f"SMTP Error: {e}")
-                err_msg = "Could not send email. Possible reasons:\n1. Incorrect Gmail App Password.\n2. No Internet Connection.\n3. Gmail security blocking the request."
+            else:
+                print(f"SMTP Error: {repr(last_error)}")
+                if isinstance(last_error, smtplib.SMTPAuthenticationError):
+                    err_msg = (
+                        "Gmail rejected the login.\n\n"
+                        "You must use a Google 'App Password' (16 letters) — NOT your\n"
+                        "normal Gmail password.\n\n"
+                        "How to create one:\n"
+                        "1. Turn on 2-Step Verification in your Google Account.\n"
+                        "2. Open Google Account → Security → App passwords.\n"
+                        "3. Generate a password and paste the 16 letters here."
+                    )
+                else:
+                    err_msg = (
+                        f"Could not send email.\n\nDetails: {last_error}\n\n"
+                        "Possible reasons:\n"
+                        "1. No internet connection.\n"
+                        "2. A firewall/network is blocking email ports (465 and 587).\n"
+                        "3. Gmail security is blocking the request."
+                    )
                 messagebox.showerror("Delivery Failed", err_msg, parent=win)
-                
-                # Safe Fallback for client reliability
-                messagebox.showinfo("System Note", f"Internet/SMTP Issue detected. For activation, use this temporary code: {self.current_otp}", parent=win)
-                
-                otp_label.pack(pady=(25, 5))
-                otp_ent.pack(pady=5)
+
+                # No on-screen code: the code must reach the administrator by
+                # email so they can relay it. Let the user fix the issue and retry.
                 send_btn.config(text="Retry Send", state='normal', bootstyle="warning-outline")
-                verify_btn.pack(pady=20)
 
         def verify_otp():
             if otp_ent.get().strip() == self.current_otp:
@@ -744,7 +816,7 @@ class QuotationApp:
         self.root.withdraw()
         setup_win = tk.Toplevel(self.root)
         setup_win.title("First Time Setup - Create Profile")
-        setup_win.state('zoomed')
+        config.maximize(setup_win)
         
         # Colors (Matching Login/Splash)
         BG_COLOR = "#0f172a"
@@ -1616,7 +1688,7 @@ class QuotationApp:
             app_instance.current_db_id = db_id
             
             new_win.title(f"{title_prefix} - [ID: {db_id}]")
-            new_win.state('zoomed')
+            config.maximize(new_win)
             new_win.lift()
             new_win.focus_force()
         
@@ -4881,19 +4953,100 @@ def start_app():
         else:
             launch_actual_app()
 
+    def show_startup_disclaimer():
+        """Show the one-time legal disclaimer as a plain Tk Toplevel.
+
+        IMPORTANT (macOS): this MUST NOT use tkinter.messagebox. A native
+        message box (NSAlert) shown during startup -- from inside the splash's
+        `after` timer callback, right after the splash window was destroyed and
+        while the root window is still hidden -- corrupts the Objective-C
+        autorelease pool and aborts the whole app (EXC_CRASH / SIGABRT,
+        "AutoreleasePoolPage::busted"). That is exactly the reopen crash on
+        macOS. A normal Toplevel avoids the native code path entirely and looks
+        identical on Windows.
+        """
+        disclaimer_text = (
+            "The calculations provided by this software are for convenience "
+            "purposes only. Users are advised to independently verify all "
+            "amounts and calculations before issuing, submitting, or relying "
+            "on any document."
+        )
+
+        # Parent to the currently visible auth window (login/setup) if there is
+        # one, otherwise fall back to the (hidden) root window.
+        parent = root
+        try:
+            for child in reversed(root.winfo_children()):
+                if isinstance(child, tk.Toplevel) and child.winfo_exists() and child.winfo_viewable():
+                    parent = child
+                    break
+        except Exception:
+            pass
+
+        dlg = tk.Toplevel(parent)
+        dlg.title("Important Disclaimer")
+        dlg.configure(bg=CARD_BG)
+        dlg.resizable(False, False)
+
+        wrap = tk.Frame(dlg, bg=CARD_BG, padx=30, pady=25)
+        wrap.pack(fill="both", expand=True)
+
+        tk.Label(wrap, text="⚠  Important Disclaimer",
+                 font=("Segoe UI", 16, "bold"), fg=ACCENT_COLOR,
+                 bg=CARD_BG).pack(anchor="w", pady=(0, 12))
+        tk.Label(wrap, text=disclaimer_text, font=("Segoe UI", 11),
+                 fg=TEXT_WHITE, bg=CARD_BG, wraplength=460,
+                 justify="left").pack(anchor="w")
+
+        def dismiss():
+            try:
+                dlg.grab_release()
+            except Exception:
+                pass
+            dlg.destroy()
+
+        ttk.Button(wrap, text="I Understand", command=dismiss,
+                   bootstyle="info").pack(anchor="e", pady=(20, 0), ipadx=6)
+        dlg.protocol("WM_DELETE_WINDOW", dismiss)
+
+        # Centre on screen and make it a modal dialog.
+        dlg.update_idletasks()
+        w, h = dlg.winfo_width(), dlg.winfo_height()
+        x = (dlg.winfo_screenwidth() - w) // 2
+        y = (dlg.winfo_screenheight() - h) // 3
+        dlg.geometry(f"+{x}+{y}")
+
+        # Guarantee the dialog is actually visible and on top BEFORE grabbing
+        # input. Otherwise, over a maximized login/setup window the small dialog
+        # can render behind it while holding a modal grab -- which silently
+        # swallows every click and makes the app look frozen (e.g. "the login
+        # button does nothing").
+        dlg.transient(parent)
+        dlg.deiconify()
+        dlg.lift()
+        dlg.attributes("-topmost", True)
+        dlg.focus_force()
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+
     def launch_actual_app():
         try:
             app_logic = QuotationApp(root)
             splash.destroy()
             # Main window remains withdrawn/hidden until successful login/setup.
-            
-            disclaimer_text = (
-                "The calculations provided by this software are for convenience purposes only. "
-                "Users are advised to independently verify all amounts and calculations before issuing, submitting, or relying on any document."
-            )
-            messagebox.showwarning("Important Disclaimer", disclaimer_text)
+            #
+            # Defer the disclaimer to a fresh idle callback (NOT this splash
+            # timer callback) and render it as a Tk Toplevel. See
+            # show_startup_disclaimer() for why a native messagebox crashes
+            # macOS on reopen.
+            root.after_idle(show_startup_disclaimer)
         except Exception as e:
-            splash.destroy()
+            try:
+                splash.destroy()
+            except Exception:
+                pass
             messagebox.showerror("Error", f"Startup Failed: {e}")
             sys.exit()
 
