@@ -8,7 +8,6 @@ from tkinter import messagebox, filedialog
 import json
 import datetime
 import sqlite3
-import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
@@ -17,7 +16,7 @@ from PIL import Image, ImageTk
 from src.quotation import QuotationApp 
 from src.config import get_db_path
 
-class CommercialApp(QuotationApp):
+class AdvanceCommercialApp(QuotationApp):
     def __init__(self, root, original_root=None, from_quotation_data=None):
         self.root = root
         self.original_root = original_root
@@ -58,7 +57,6 @@ class CommercialApp(QuotationApp):
         self.vendor_email_var.set("mafzalsipra@gmail.com")
  
         # ✅ FIX: Explicitly enable Maximize/Minimize and ensure focus
-        # Removed transient("") to avoid focus oddities
         self.root.resizable(True, True)
         self.root.lift()
         self.root.focus_force()
@@ -67,11 +65,11 @@ class CommercialApp(QuotationApp):
         
         # 4) Commercial-specific overrides
         self.header_rows = [] 
-        self.root.title("Commercial Invoice")
-        self.doc_title_var.set("Commercial Invoice") 
-        next_ci = self._get_next_ref("commercial_invoices", "CI-")
-        self.quotation_no_var.set(next_ci)
-        self.details_doc_no_var.set(next_ci)
+        self.root.title("Advance Commercial Invoice")
+        self.doc_title_var.set("Advance Commercial Invoice") 
+        next_aci = self._get_next_ref("advance_commercial_invoices", "ACI-")
+        self.quotation_no_var.set(next_aci)
+        self.details_doc_no_var.set(next_aci)
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
@@ -82,7 +80,6 @@ class CommercialApp(QuotationApp):
             self.tree.bind("<Double-1>", self.on_tree_double_click)
 
         # ✅ Override Default Column Widths for Commercial Invoice (PDF Optimized)
-        # These match the "balanced" values: SNo:25, UOM:40, Qty:35, Price:65, Amount:75, GST:55, Total:85, Desc:115
         opt_widths = {'sno': 25, 'uom': 40, 'qty': 35, 'price': 65, 'amount': 75, 'gst': 55, 'total': 85, 'desc': 115}
         for col in self.columns_config:
             if col['id'] in opt_widths:
@@ -153,7 +150,7 @@ class CommercialApp(QuotationApp):
                 try: self.original_root.deiconify()
                 except: pass
                 
-            print("✅ Commercial closure clean")
+            print("✅ Advance Commercial closure clean")
         except Exception as e:
             print(f"Close warning: {e}")
         finally:
@@ -164,9 +161,7 @@ class CommercialApp(QuotationApp):
         self.header_rows = []
 
     def refresh_custom_header_ui(self):
-        print(f"[DEBUG] refresh_custom_header_ui called. header_grid_fr exists: {hasattr(self, 'header_grid_fr')}, header_rows count: {len(self.header_rows)}", flush=True)
         if not hasattr(self, 'header_grid_fr') or self.header_grid_fr is None:
-            print("[DEBUG] header_grid_fr is missing or None", flush=True)
             return
         for w in self.header_grid_fr.winfo_children(): w.destroy()
 
@@ -174,7 +169,6 @@ class CommercialApp(QuotationApp):
         for i, row in enumerate(self.header_rows):
             if row.get('type') == 'standard': continue
             custom_exists = True
-            print(f"[DEBUG] Row {i} type: {row.get('type')}", flush=True)
             
             fr = ttk.Frame(self.header_grid_fr)
             fr.pack(fill='x', pady=2)
@@ -207,16 +201,19 @@ class CommercialApp(QuotationApp):
                 ttk.Entry(fr, textvariable=row['r_label_var'], width=12).pack(side='left', padx=2)
                 ttk.Entry(fr, textvariable=row['r_val'], width=20).pack(side='left', padx=2)
 
+        if not custom_exists:
+            pass
+
     # --- Database ---
     def init_database(self):
         try:
             import sqlite3
-            self.db_name = "CommercialInvoice_Manager.db"
+            self.db_name = "AdvanceCommercialInvoice_Manager.db"
             self.conn = sqlite3.connect(get_db_path(self.db_name))
             self.cursor = self.conn.cursor()
             # Ensure the table exists in this database
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS commercial_invoices (
+                CREATE TABLE IF NOT EXISTS advance_commercial_invoices (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ref_no TEXT UNIQUE,
                     client_name TEXT,
@@ -226,7 +223,7 @@ class CommercialApp(QuotationApp):
                 )
             """)
             self.conn.commit()
-            print("✅ Connected to separate database CommercialInvoice_Manager.db")
+            print("✅ Connected to separate database AdvanceCommercialInvoice_Manager.db")
         except Exception as e:
             messagebox.showerror("Database Error", f"SQL Server Connection Failed:\n{e}")
 
@@ -237,9 +234,9 @@ class CommercialApp(QuotationApp):
         orig_root = getattr(self, 'original_root', None)
         self.on_closing()
         if orig_root:
-            from src.components.commercial_selector import open_commercial_hub
+            from src.components.advance_commercial_selector import open_advance_commercial_hub
             orig_root.withdraw()
-            open_commercial_hub(orig_root)
+            open_advance_commercial_hub(orig_root)
 
     # =========================================================
     #  3. HEADER GUI
@@ -255,9 +252,7 @@ class CommercialApp(QuotationApp):
         ttk.Button(btn_fr, text="📊 Back to Dashboard", command=self.go_to_dashboard).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📂 Open Saved/History", command=self.open_history_hub).pack(side='left', padx=5)
         
-        # ✅ FIXED: "Manage Header Rows" Button Restored
         ttk.Button(btn_fr, text="📑 Manage Header Rows", command=self.open_header_manager).pack(side='left', padx=5)
-        
         ttk.Button(btn_fr, text="🛠 Manage Columns", command=self.open_column_manager).pack(side='right', padx=5)
 
         # 2. TOP HEADER GRID
@@ -274,7 +269,7 @@ class CommercialApp(QuotationApp):
         self.header_logo_lbl.pack(side='left', pady=2)
 
         # --- CENTER: TITLE ---
-        tk.Label(top_grid, text="Commercial Invoice", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
+        tk.Label(top_grid, text="Advance Commercial Invoice", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
 
         # --- INVOICE NO & DATE ---
         meta_fr = ttk.Frame(top_grid)
@@ -517,11 +512,11 @@ class CommercialApp(QuotationApp):
              t_style.append(('ALIGN', (0,0), (-1,-1), align_val))
              
              if self.footer_logo_path:
-                 target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
-                 img = self._get_scaled_image(self.footer_logo_path, target_w)
-                 t_foot = Table([[f_txt], [img]], colWidths=[540])
+                  target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
+                  img = self._get_scaled_image(self.footer_logo_path, target_w)
+                  t_foot = Table([[f_txt], [img]], colWidths=[540])
              else:
-                 t_foot = Table([[f_txt]], colWidths=[540])
+                  t_foot = Table([[f_txt]], colWidths=[540])
              
              t_foot.setStyle(TableStyle(t_style))
              t_foot.wrapOn(None, 540, A4[1])
@@ -542,11 +537,11 @@ class CommercialApp(QuotationApp):
         img_right = self._get_scaled_image(get_v('h_logo_r', 'header_logo_right_path'), 1.2) if get_v('h_logo_r', 'header_logo_right_path') else ""
         
         title_style = ParagraphStyle('Title', parent=norm_style, fontName='Helvetica-Bold', fontSize=22, alignment=TA_CENTER)
-        title_p = Paragraph("Commercial Invoice", title_style)
+        title_p = Paragraph("Advance Commercial Invoice", title_style)
         
         cw = 540 
         h_data = [[img_left, title_p, img_right]]
-        t_head = Table(h_data, colWidths=[cw*0.25, cw*0.5, cw*0.25])
+        t_head = Table(h_data, colWidths=[cw*0.12, cw*0.76, cw*0.12])
         t_head.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
@@ -648,7 +643,7 @@ class CommercialApp(QuotationApp):
                  custom_header_data.append([p_l, p_r])
         
         if custom_header_data:
-            t_dyn_header = Table(custom_header_data, colWidths=[270, 270])
+            t_dyn_header = Table(custom_header_data, colWidths=[CW*0.5, CW*0.5])
             t_dyn_header.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -681,16 +676,10 @@ class CommercialApp(QuotationApp):
                 except: lbl = "GST"
             headers.append(Paragraph(f"<b>{lbl}</b>", item_head_style))
         
-        # Add the spare column header if needed
-        # headers.append(Paragraph("", item_head_style)) # REMOVED SPARE
-        
         data = [headers]
         total_tax_calc = 0.0
 
         # DYNAMIC COLUMN WIDTH LOGIC
-        # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
-        # Treats user-defined widths as 'weights' and scales them to fit exactly 540pts.
-        # This ensures perfect symmetry: adding a column shrinks others proportionally.
         CW = 540 # Total Page Content Width
         
         # 1. Get Raw Widths from Config
@@ -698,15 +687,11 @@ class CommercialApp(QuotationApp):
         total_raw = sum(raw_widths)
         
         # 2. Calculate Scale Factor
-        # Avoid division by zero
         if total_raw == 0: total_raw = 1 
         scale_factor = CW / total_raw
         
         # 3. Apply Scale Factor
         pdf_col_widths = [w * scale_factor for w in raw_widths]
-            
-        # Add the spare column width (Removed)
-        # pdf_col_widths.append(SPARE_W) # REMOVED SPARE
         
         for item in self.items_data:
             total_tax_calc += item.get('gst', 0.0)
@@ -720,8 +705,6 @@ class CommercialApp(QuotationApp):
                         p_style = item_num_style
                     except: pass
                 row.append(Paragraph(str(val).replace("\n", "<br/>"), p_style))
-            
-            # row.append("") # Spare empty cell - REMOVED
             data.append(row)
         
         t_items = Table(data, colWidths=pdf_col_widths, repeatRows=1, splitByRow=True)
@@ -786,11 +769,11 @@ class CommercialApp(QuotationApp):
 
         elements.append(Spacer(1, 20))
 
-        # --- TERMS & SIGNATURES BLOCK (KeepTogether protection) ---
+        # --- TERMS & SIGNATURES BLOCK ---
         footer_elements = []
         footer_elements.append(Spacer(1, 15))
         
-        # Terms & Conditions (RESTORED)
+        # Terms & Conditions
         footer_elements.append(Paragraph("<b>Terms & Conditions:</b>", ParagraphStyle('BT', parent=norm_style, fontSize=10)))
         terms_content = pre_fetched_terms if pre_fetched_terms is not None else self._get_tagged_text()
         footer_elements.append(Paragraph(terms_content, ParagraphStyle('BC', parent=norm_style, fontSize=9)))
@@ -799,7 +782,6 @@ class CommercialApp(QuotationApp):
         # Prepared / Approved By with Red Note
         footer_elements.append(Spacer(1, 50))
         
-        # Create styles for signature block
         sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=10, alignment=TA_LEFT)
         sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=10, alignment=TA_RIGHT)
         sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=9, alignment=TA_CENTER)
@@ -810,7 +792,6 @@ class CommercialApp(QuotationApp):
             Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
         ]]
         
-        # Reduce gap: 25% + 50% + 25% layout
         t_sig = Table(sig_data, colWidths=[CW*0.25, CW*0.5, CW*0.25])
         t_sig.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
@@ -823,19 +804,13 @@ class CommercialApp(QuotationApp):
         ]))
         footer_elements.append(t_sig)
         
-        sys_gen_style = ParagraphStyle('SysGen', parent=styles['Normal'], fontSize=8, alignment=TA_CENTER, textColor=colors.grey)
-        # footer_elements.append(Paragraph("This is a system generated document so no need to sign.", sys_gen_style))
-        
         elements.append(KeepTogether(footer_elements))
-
         elements.append(Spacer(1, 10))
 
-        # --- CANVAS DRAWING (FOR QR/SOCIAL ON EVERY PAGE) ---
+        # --- CANVAS DRAWING ---
         website_link = "https://www.orientmarketing.com.pk/"
         qr_string = f"Invoice No: {self.quotation_no_var.get()}\nDate: {self.doc_date_var.get()}\nClient: {self.client_name_var.get()}\nNet Amount: {self.grand_total_var.get()}\n{website_link}"
         qr_img = self._generate_qr_code(qr_string, size_inch=0.5)
-
-        # qr_img = self._generate_qr_code(qr_string, size_inch=0.8) # QR Code
         
         # Pre-calc footer for pinning logic
         t_foot = None
@@ -847,11 +822,11 @@ class CommercialApp(QuotationApp):
              t_style.append(('ALIGN', (0,0), (-1,-1), align_val))
              
              if self.footer_logo_path:
-                 target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
-                 img = self._get_scaled_image(self.footer_logo_path, target_w)
-                 t_foot = Table([[f_txt], [img]], colWidths=[540])
+                  target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
+                  img = self._get_scaled_image(self.footer_logo_path, target_w)
+                  t_foot = Table([[f_txt], [img]], colWidths=[540])
              else:
-                 t_foot = Table([[f_txt]], colWidths=[540])
+                  t_foot = Table([[f_txt]], colWidths=[540])
              
              t_foot.setStyle(TableStyle(t_style))
              t_foot.wrapOn(None, 540, A4[1])
@@ -870,7 +845,6 @@ class CommercialApp(QuotationApp):
                 qr_y = 20 # Bottom Margin
                 qr_img.drawOn(canvas, qr_x, qr_y)
 
-            
             # Draw Social Media Icons on bottom left
             try:
                 icon_size = 16
@@ -890,7 +864,6 @@ class CommercialApp(QuotationApp):
                     canvas.setFont("Helvetica-Bold", 10)
                     canvas.drawString(social_x + 4, y_pos + 4, symbol)
                     canvas.linkURL(url, (social_x, y_pos, social_x + icon_size, y_pos + icon_size), relative=0)
-
             except Exception as e:
                 print(f"Social icons error: {e}")
 
@@ -917,7 +890,7 @@ class CommercialApp(QuotationApp):
             return None
 
     def on_preview_click(self):
-        """PDF Preview logic for Commercial Invoice (Multithreaded to avoid hangs)"""
+        """PDF Preview logic for Advance Commercial Invoice (Multithreaded to avoid hangs)"""
         if getattr(self, 'is_generating_pdf', False):
             return
         self.is_generating_pdf = True
@@ -929,8 +902,6 @@ class CommercialApp(QuotationApp):
         wait.geometry("350x120")
         wait.resizable(False, False)
         wait.transient(self.root)
-        # ✅ FIX: Don't use grab_set - it blocks the UI
-        # wait.grab_set()
         
         # Center the window
         try:
@@ -941,7 +912,7 @@ class CommercialApp(QuotationApp):
             wait.geometry(f"+{root_x + (root_w//2) - 175}+{root_y + (root_h//2) - 60}")
         except: pass
 
-        tk.Label(wait, text="🔄 Generating Commercial PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
+        tk.Label(wait, text="🔄 Generating Advance Commercial PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
         tk.Label(wait, text="This might take a few seconds...", font=("Arial", 9), fg="grey").pack()
         
         try:
@@ -1090,21 +1061,21 @@ class CommercialApp(QuotationApp):
 
             if self.current_db_id:
                 self.cursor.execute("""
-                    UPDATE commercial_invoices 
+                    UPDATE advance_commercial_invoices 
                     SET ref_no=?, client_name=?, date=?, grand_total=?, full_data=? 
                     WHERE id=?
                 """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), gt, full_data, self.current_db_id))
             else:
                 # ✅ UNIQUE CHECK: Prevent "UNIQUE constraint failed"
-                self.cursor.execute("SELECT id FROM commercial_invoices WHERE ref_no=?", (self.quotation_no_var.get(),))
+                self.cursor.execute("SELECT id FROM advance_commercial_invoices WHERE ref_no=?", (self.quotation_no_var.get(),))
                 exists = self.cursor.fetchone()
                 if exists:
                     if not silent: 
-                        messagebox.showerror("Duplicate Error", f"Commercial Invoice No '{self.quotation_no_var.get()}' already saved!\n\nPlease use a unique number.")
+                        messagebox.showerror("Duplicate Error", f"Advance Commercial Invoice No '{self.quotation_no_var.get()}' already saved!\n\nPlease use a unique number.")
                     return False
 
                 self.cursor.execute("""
-                    INSERT INTO commercial_invoices (ref_no, client_name, date, grand_total, full_data) 
+                    INSERT INTO advance_commercial_invoices (ref_no, client_name, date, grand_total, full_data) 
                     VALUES (?,?,?,?,?)
                 """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), gt, full_data))
                 
@@ -1112,18 +1083,18 @@ class CommercialApp(QuotationApp):
 
             self.conn.commit()
             self.is_saved = True
-            if not silent: messagebox.showinfo("Saved", "Commercial Invoice Saved to SQLite!")
+            if not silent: messagebox.showinfo("Saved", "Advance Commercial Invoice Saved to SQLite!")
             return True
         except Exception as e: 
             if not silent: messagebox.showerror("Error", str(e))
             return False
+
     def load_from_quotation_data(self, json_data):
         try:
             data = json.loads(json_data)
             h = data.get("header", {})
             self.rfq_no_var.set(h.get("quot_no", "")) 
             
-            # ✅ FIX: Use actual Ref No from data if available, instead of hardcoded 55
             doc_no = h.get("ref_no") or h.get("inv_no") or h.get("quot_no") or "55"
             self.quotation_no_var.set(doc_no) 
             
@@ -1160,5 +1131,5 @@ class CommercialApp(QuotationApp):
 
 if __name__ == "__main__":
     root = ttk.Window(themename="lumen")
-    app = CommercialApp(root)
+    app = AdvanceCommercialApp(root)
     root.mainloop()

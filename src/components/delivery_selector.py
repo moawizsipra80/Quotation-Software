@@ -257,6 +257,60 @@ def open_dc_hub(root_window):
     ttk.Button(tab4, text="⬇ Load Commercial Invoice into Delivery Challan", command=convert_commercial_invoice_to_dc).pack(fill='x', padx=50, pady=10)
 
     # ==================================
+    # TAB 5: Convert Advance Commercial Invoice to DC
+    # ==================================
+    tab5 = ttk.Frame(tabs)
+    tabs.add(tab5, text="🔄 Convert Advance Commercial Invoice to DC")
+    
+    cols5 = ("ID", "Inv No", "Client", "Amount")
+    tree5 = ttk.Treeview(tab5, columns=cols5, show='headings', height=10)
+    tree5.heading("ID", text="ID"); tree5.column("ID", width=40, anchor="center")
+    tree5.heading("Inv No", text="Inv No"); tree5.column("Inv No", width=100)
+    tree5.heading("Client", text="Client Name"); tree5.column("Client", width=200)
+    tree5.heading("Amount", text="Total"); tree5.column("Amount", width=100)
+    
+    sb5 = ttk.Scrollbar(tab5, orient="vertical", command=tree5.yview)
+    tree5.configure(yscrollcommand=sb5.set)
+    tree5.pack(side='left', fill='both', expand=True)
+    sb5.pack(side='right', fill='y')
+
+    try:
+        conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='advance_commercial_invoices'")
+        if cur.fetchone():
+            cur.execute("SELECT id, ref_no, client_name, grand_total FROM advance_commercial_invoices ORDER BY id DESC")
+            for row in cur.fetchall():
+                tree5.insert("", "end", values=row)
+        conn.close()
+    except: 
+        pass
+
+    def convert_advance_commercial_invoice_to_dc():
+        sel = tree5.selection()
+        if not sel: 
+            messagebox.showwarning("Warning", "Select an Advance Commercial Invoice first!")
+            return
+        inv_id = tree5.item(sel[0])['values'][0]
+        try:
+            conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
+            cur = conn.cursor()
+            cur.execute("SELECT full_data FROM advance_commercial_invoices WHERE id=?", (inv_id,))
+            row = cur.fetchone()
+            conn.close()
+            if row:
+                hub.destroy()
+                new_win = tk.Toplevel(root_window)
+                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_dc(new_win))
+                DeliveryChallanApp(new_win, original_root=root_window, from_quotation_data=row[0])
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    tree5.bind("<Double-1>", lambda event: convert_advance_commercial_invoice_to_dc())
+    ttk.Button(tab5, text="⬇ Load Advance Commercial Invoice into Delivery Challan", command=convert_advance_commercial_invoice_to_dc).pack(fill='x', padx=50, pady=10)
+
+    # ==================================
     # Create New Blank
     # ==================================
     ttk.Separator(hub, orient='horizontal').pack(fill='x', padx=10, pady=5)

@@ -93,16 +93,14 @@ class DeliveryChallanApp(QuotationApp):
         self.header_logo_path = None
         self.header_logo_right_path = None
         
-        # Logo 1: Box ke andar wala
         self.delivered_logo_path = None 
         
-        # Logo 2: Page ke neeche wala (Sticker)
+ 
         self.footer_logo_path = None 
         self.f_logo_size_var = tk.DoubleVar(value=1.2)
         self.footer_align_var = tk.StringVar(value="Center") # Left, Center, Right
         self.footer_text_var = tk.StringVar()
         self.details_doc_no_var = tk.StringVar()
-        # 2) Parent init
         super().__init__(root) 
         self.vendor_email_var.set("mafzalsipra@gmail.com")
         
@@ -1147,6 +1145,8 @@ class DeliveryChallanApp(QuotationApp):
                 db_name = "DeliveryChallan_Manager.db"
             elif table_name == "commercial_invoices":
                 db_name = "CommercialInvoice_Manager.db"
+            elif table_name == "advance_commercial_invoices":
+                db_name = "AdvanceCommercialInvoice_Manager.db"
             elif table_name == "tax_invoices":
                 db_name = "TaxInvoice_Manager.db"
 
@@ -1198,6 +1198,8 @@ class DeliveryChallanApp(QuotationApp):
                 db_name = "DeliveryChallan_Manager.db"
             elif table_name == "commercial_invoices":
                 db_name = "CommercialInvoice_Manager.db"
+            elif table_name == "advance_commercial_invoices":
+                db_name = "AdvanceCommercialInvoice_Manager.db"
             elif table_name == "tax_invoices":
                 db_name = "TaxInvoice_Manager.db"
 

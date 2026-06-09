@@ -1100,6 +1100,7 @@ class QuotationApp:
                 "QuotationManager_Final.db",
                 "TaxInvoice_Manager.db",
                 "CommercialInvoice_Manager.db",
+                "AdvanceCommercialInvoice_Manager.db",
                 "DeliveryChallan_Manager.db"
             ]
             
@@ -1479,12 +1480,14 @@ class QuotationApp:
             "Quotations": "quotations",
             "Tax Invoices": "tax_invoices", 
             "Commercial Invoices": "commercial_invoices",
+            "Advance Commercial Invoices": "advance_commercial_invoices",
             "Delivery Challans": "delivery_challans"
         }
         db_map = {
             "quotations": "QuotationManager_Final.db",
             "tax_invoices": "TaxInvoice_Manager.db",
             "commercial_invoices": "CommercialInvoice_Manager.db",
+            "advance_commercial_invoices": "AdvanceCommercialInvoice_Manager.db",
             "delivery_challans": "DeliveryChallan_Manager.db"
         }
         
@@ -2406,6 +2409,8 @@ class QuotationApp:
             self.header_rows.append(row_cfg)
 
     def refresh_custom_header_ui(self):
+        if not hasattr(self, 'header_grid_fr') or self.header_grid_fr is None:
+            return
         for w in self.header_grid_fr.winfo_children(): w.destroy()
         
         # Grid for fields
@@ -2475,6 +2480,19 @@ class QuotationApp:
             ttk.Label(self.header_grid_fr, text="No custom rows added. Use 'Manage Header Rows' to add.", foreground="grey").pack()
 
     def open_header_manager(self):
+        # Backup current header rows to revert on cancel/close
+        original_header_rows_data = []
+        for r in self.header_rows:
+            original_header_rows_data.append({
+                "type": r.get("type"),
+                "bg": r.get("bg", "#ffffff"),
+                "fg": r.get("fg", "#000000"),
+                "l_label": r.get("l_label_var").get() if "l_label_var" in r else r.get("l_label", ""),
+                "r_label": r.get("r_label_var").get() if "r_label_var" in r else r.get("r_label", ""),
+                "l_val": r.get("l_val").get() if isinstance(r.get("l_val"), tk.Variable) else r.get("l_val", ""),
+                "r_val": r.get("r_val").get() if isinstance(r.get("r_val"), tk.Variable) else r.get("r_val", "")
+            })
+
         mgr = tk.Toplevel(self.root)
         mgr.title("Header Row Manager")
         mgr.geometry("900x600")
@@ -2496,13 +2514,28 @@ class QuotationApp:
         ttk.Button(btn_fr, text="+ Add Split Row (Vendor | Client)", command=lambda: self.add_header_row("split")).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="+ Add Full Row (Full Width)", command=lambda: self.add_header_row("full")).pack(side='left', padx=5)
         
-        # CLOSE BUTTON REFRESHES MAIN UI
-        def _close():
+        def _cancel():
+            self.header_rows = []
+            for r in original_header_rows_data:
+                self.header_rows.append({
+                    "type": r.get("type"),
+                    "bg": r.get("bg", "#ffffff"),
+                    "fg": r.get("fg", "#000000"),
+                    "l_label_var": tk.StringVar(value=r.get("l_label", "")),
+                    "r_label_var": tk.StringVar(value=r.get("r_label", "")),
+                    "l_val": tk.StringVar(value=r.get("l_val", "")),
+                    "r_val": tk.StringVar(value=r.get("r_val", ""))
+                })
+            self.refresh_custom_header_ui()
+            mgr.destroy()
+
+        def _done():
             self.refresh_custom_header_ui()
             mgr.destroy()
             
-        mgr.protocol("WM_DELETE_WINDOW", _close)
-        ttk.Button(btn_fr, text="Done / Close", command=_close).pack(side='right')
+        mgr.protocol("WM_DELETE_WINDOW", _cancel)
+        ttk.Button(btn_fr, text="Cancel / Close", command=_cancel, bootstyle="danger").pack(side='right', padx=5)
+        ttk.Button(btn_fr, text="Done", command=_done, bootstyle="success").pack(side='right', padx=5)
 
         self.refresh_header_mgr()
 
