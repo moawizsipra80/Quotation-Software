@@ -87,6 +87,15 @@ class DashboardPanel:
             messagebox.showerror("Error", f"Could not launch Commercial Invoice Manager: {e}")
             self.app.root.deiconify()
 
+    def launch_advance_commercial_hub(self):
+        try:
+            self.app.root.withdraw()
+            from src.components.advance_commercial_selector import open_advance_commercial_hub
+            open_advance_commercial_hub(self.app.root)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not launch Advance Commercial Invoice Manager: {e}")
+            self.app.root.deiconify()
+
     def launch_dc_hub(self):
         try:
             self.app.root.withdraw()
@@ -111,6 +120,11 @@ class DashboardPanel:
                 from commercial import CommercialApp
                 win = tk.Toplevel(self.app.root)
                 CommercialApp(win, original_root=self.app.root) # Pass dashboard root
+                
+            elif name == "advance_commercial":
+                from advance_commercial import AdvanceCommercialApp
+                win = tk.Toplevel(self.app.root)
+                AdvanceCommercialApp(win, original_root=self.app.root) # Pass dashboard root
                 
             elif name == "delivery":
                 from delivery_challan import DeliveryChallanApp
@@ -446,7 +460,8 @@ class DashboardPanel:
             db_tables = {
                 "quotations": "QuotationManager_Final.db",
                 "tax_invoices": "TaxInvoice_Manager.db",
-                "commercial_invoices": "CommercialInvoice_Manager.db"
+                "commercial_invoices": "CommercialInvoice_Manager.db",
+                "advance_commercial_invoices": "AdvanceCommercialInvoice_Manager.db"
             }
             
             for tbl, db_file in db_tables.items():
@@ -494,6 +509,7 @@ class DashboardPanel:
         self._make_menu_btn(left_panel, "🚚 Delivery Challan", lambda: self.launch_dc_hub())
         self._make_menu_btn(left_panel, "📄 Tax Invoice", lambda: self.launch_invoice_hub())
         self._make_menu_btn(left_panel, "🧾 Commercial Inv", lambda: self.launch_commercial_hub())        
+        self._make_menu_btn(left_panel, "🧾 Advance Commercial Inv", lambda: self.launch_advance_commercial_hub())        
         
         tk.Label(left_panel, text="SYSTEM", bg=style.BG_SIDE, fg="grey", font=("Arial", 8, "bold")).pack(anchor='w', padx=20, pady=(20, 5))
         self._make_menu_btn(left_panel, "⚙️ Settings / Backup", self.open_settings_window)
@@ -939,17 +955,19 @@ class DashboardPanel:
         mid = tk.Frame(win, bg="#ecf0f1")
         mid.pack(side='top', fill="both", expand=True, padx=10, pady=(0, 10))
 
-        cols = ("client", "quotations", "tax_invoices", "comm_invoices")
+        cols = ("client", "quotations", "tax_invoices", "comm_invoices", "adv_comm_invoices")
         tree = ttk.Treeview(mid, columns=cols, show="headings", height=18)
         tree.heading("client", text="Client Name")
         tree.heading("quotations", text="Quotations")
         tree.heading("tax_invoices", text="Tax Invoices")
         tree.heading("comm_invoices", text="Comm Invoices")
+        tree.heading("adv_comm_invoices", text="Adv Comm Invoices")
 
-        tree.column("client", width=320, anchor="w")
-        tree.column("quotations", width=120, anchor="center")
-        tree.column("tax_invoices", width=120, anchor="center")
-        tree.column("comm_invoices", width=130, anchor="center")
+        tree.column("client", width=250, anchor="w")
+        tree.column("quotations", width=100, anchor="center")
+        tree.column("tax_invoices", width=100, anchor="center")
+        tree.column("comm_invoices", width=110, anchor="center")
+        tree.column("adv_comm_invoices", width=130, anchor="center")
 
         vsb = ttk.Scrollbar(mid, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
@@ -1013,11 +1031,11 @@ class DashboardPanel:
 
             month_key = f"{year:04d}-{month:02d}%"  # matches 'YYYY-MM-%'
 
-            stats = {}  # client -> {'q': int, 'tax': int, 'comm': int}
+            stats = {}  # client -> {'q': int, 'tax': int, 'comm': int, 'adv_comm': int}
 
             def ensure(c):
                 if c not in stats:
-                    stats[c] = {"q": 0, "tax": 0, "comm": 0}
+                    stats[c] = {"q": 0, "tax": 0, "comm": 0, "adv_comm": 0}
                 return stats[c]
 
             try:
@@ -1064,6 +1082,22 @@ class DashboardPanel:
                     print("Error loading Commercial Invoice summary:", e)
                     pass
 
+                # 3b. Advance Commercial invoices
+                try:
+                    conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT client_name, COUNT(*) FROM advance_commercial_invoices WHERE date LIKE ? GROUP BY client_name",
+                        (month_key,),
+                    )
+                    for c_name, cnt in cur.fetchall():
+                        if not c_name: continue
+                        ensure(c_name)["adv_comm"] += int(cnt or 0)
+                    conn.close()
+                except Exception as e:
+                    print("Error loading Advance Commercial Invoice summary:", e)
+                    pass
+
             except Exception as e:
                 messagebox.showerror("DB Error", str(e), parent=win)
                 return
@@ -1071,7 +1105,7 @@ class DashboardPanel:
             # Insert sorted by total docs
             sorted_items = sorted(
                 stats.items(),
-                key=lambda kv: (kv[1]["q"] + kv[1]["tax"] + kv[1]["comm"]),
+                key=lambda kv: (kv[1]["q"] + kv[1]["tax"] + kv[1]["comm"] + kv[1]["adv_comm"]),
                 reverse=True,
             )
 
@@ -1079,7 +1113,7 @@ class DashboardPanel:
                 tree.insert(
                     "",
                     "end",
-                    values=("No data for selected month", 0, 0, 0),
+                    values=("No data for selected month", 0, 0, 0, 0),
                 )
                 return
 
@@ -1087,7 +1121,7 @@ class DashboardPanel:
                 tree.insert(
                     "",
                     "end",
-                    values=(client, v["q"], v["tax"], v["comm"]),
+                    values=(client, v["q"], v["tax"], v["comm"], v["adv_comm"]),
                 )
 
         btn_reload.configure(command=load_summary)
@@ -1154,6 +1188,16 @@ class DashboardPanel:
                 conn.close()
             except Exception as e:
                 print("Error loading Commercial Invoices:", e)
+
+            # 3b. Advance Commercial Invoices
+            try:
+                conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
+                cur = conn.cursor()
+                cur.execute("SELECT 'Adv Comm Invoice', ref_no, date, grand_total FROM advance_commercial_invoices WHERE client_name=?", (client_name,))
+                rows.extend(cur.fetchall())
+                conn.close()
+            except Exception as e:
+                print("Error loading Advance Commercial Invoices:", e)
 
             # 4. Delivery Challans
             try:
@@ -1269,6 +1313,20 @@ class DashboardPanel:
             except Exception as e:
                 print("Error loading Commercial Invoice count:", e)
                 c_c = 0
+
+            # 3b. Advance Commercial invoices
+            try:
+                conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) FROM advance_commercial_invoices WHERE client_name=? AND date LIKE ?",
+                    (client_name, month_key),
+                )
+                ac_c = int(cur.fetchone()[0] or 0)
+                conn.close()
+            except Exception as e:
+                print("Error loading Advance Commercial Invoice count:", e)
+                ac_c = 0
         except Exception as e:
             messagebox.showerror("Error", f"Count load failed: {e}")
             return
@@ -1284,9 +1342,9 @@ class DashboardPanel:
         fig = Figure(figsize=(5.5, 3.2), dpi=100)
         ax = fig.add_subplot(111)
 
-        labels = ["Quotations", "Tax Invoices", "Comm Invoices"]
-        values = [q_c, t_c, c_c]
-        colors = ["#3498db", "#e74c3c", "#f1c40f"]
+        labels = ["Quotations", "Tax Invoices", "Comm Invoices", "Adv Comm Invoices"]
+        values = [q_c, t_c, c_c, ac_c]
+        colors = ["#3498db", "#e74c3c", "#f1c40f", "#e67e22"]
 
         x = list(range(len(labels)))
         ax.bar(x, values, color=colors, width=0.6)

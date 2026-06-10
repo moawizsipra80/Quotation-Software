@@ -1,32 +1,27 @@
 try:
     from src import config
 except ImportError:
-    import config # 🚀 Register dynamic subfolder paths first
+    import config 
 import tkinter as tk
 import ttkbootstrap as ttk
 from tkinter import messagebox, filedialog
 import json
 import datetime
-# import sqlite3
 import sqlite3
 import os
 import copy
 from PIL import Image, ImageTk  
-# ✅ REPORTLAB IMPORTS
-# ✅ Lazy Imports (Moved inside functions for speed)
 
 # Parent Class Import
 from src.quotation import QuotationApp 
 from src.config import get_db_path
 
-class InvoiceApp(QuotationApp):
+class AdvanceCommercialApp(QuotationApp):
     def __init__(self, root, original_root=None, from_quotation_data=None):
         self.root = root
         self.original_root = original_root
         self.is_invoice_window = True 
-        config.maximize(self.root)
-        self.root.lift()
-        self.root.focus_force() 
+        
         # 1) Invoice Specific Vars
         self.left_header_title = tk.StringVar(value="Client  - Data")
         self.right_header_title = tk.StringVar(value="Orient Marketing - Data")
@@ -47,54 +42,50 @@ class InvoiceApp(QuotationApp):
         self.wht_rate_var = tk.StringVar(value="5.5")
         self.wht_total_var = tk.StringVar(value="0.00")
         self.print_wht_var = tk.BooleanVar(value=True)
-
+        config.maximize(self.root)
+        self.root.lift()
+        self.root.focus_force()
         # Logo Paths
         self.header_logo_right_path = None
-        
-       
-        self.current_db_id = None
-        self.auto_save_timer = None
-        
-        # 2) DB Init First (to be used by parent)
+
+        # 2) DB Init First
         self.init_database()
         self.details_doc_no_var = tk.StringVar()
         
         # 3) Parent init
         super().__init__(root) 
         self.vendor_email_var.set("mafzalsipra@gmail.com")
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-
-        # 4) Invoice-specific overrides
+ 
+        # ✅ FIX: Explicitly enable Maximize/Minimize and ensure focus
         self.root.resizable(True, True)
         self.root.lift()
         self.root.focus_force()
 
-        # 3) Invoice-specific overrides
-        self.header_rows = [] 
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        self.root.title(" Sales TAX Invoice ")
-        self.doc_title_var.set("Sales Tax Invoice") 
-        next_inv = self._get_next_ref("tax_invoices", "INV-")
-        self.quotation_no_var.set(next_inv)
-        self.details_doc_no_var.set(next_inv)
+        # 4) Commercial-specific overrides
+        self.header_rows = [] 
+        self.root.title("Advance Commercial Invoice")
+        self.doc_title_var.set("Advance Commercial Invoice") 
+        next_aci = self._get_next_ref("advance_commercial_invoices", "ACI-")
+        self.quotation_no_var.set(next_aci)
+        self.details_doc_no_var.set(next_aci)
         self.approved_by_var.set("Manager Accounts")
 
         if from_quotation_data:
             self.load_from_quotation_data(from_quotation_data)
 
-        # Use parent's comprehensive editing method that allows editing ALL columns
-        self.tree.bind("<Double-1>", self.on_tree_double_click)
-        
-        self._init_default_widths_invoice()
-        
-    def _init_default_widths_invoice(self):
-        # Optimized default widths for Sales Tax Invoice
-        opt_widths = {'sno': 25, 'uom': 35, 'qty': 45, 'price': 65, 'amount': 85, 'gst': 65, 'total': 95, 'desc': 125}
+        # Enable all-column editing via parent's comprehensive method
+        if hasattr(self, 'tree'):
+            self.tree.bind("<Double-1>", self.on_tree_double_click)
+
+        # ✅ Override Default Column Widths for Commercial Invoice (PDF Optimized)
+        opt_widths = {'sno': 25, 'uom': 40, 'qty': 35, 'price': 65, 'amount': 75, 'gst': 55, 'total': 85, 'desc': 115}
         for col in self.columns_config:
             if col['id'] in opt_widths:
                 col['width'] = opt_widths[col['id']]
 
-    #  LOAD LOGO FUNCTION
+    #LOAD LOGO FUNCTION
     def load_logo(self, which):
         try:
             path = filedialog.askopenfilename(
@@ -143,21 +134,86 @@ class InvoiceApp(QuotationApp):
             lbl.config(image='', text="")
             lbl.image = None
 
-
+    def on_closing(self):
+        """Optimized closing: Instantly restores dashboard and saves cleanly"""
+        if not self.confirm_and_save_before_closing():
+            return # Abort!
+            
+        try:
+            # 1. Cancel timer
+            if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
+                try: self.root.after_cancel(self.auto_save_timer)
+                except: pass
+            
+            # 2. Restore dashboard immediately for fast feel
+            if hasattr(self, 'original_root') and self.original_root:
+                try: self.original_root.deiconify()
+                except: pass
+                
+            print("✅ Advance Commercial closure clean")
+        except Exception as e:
+            print(f"Close warning: {e}")
+        finally:
+            try: self.root.destroy()
+            except: pass
 
     def _init_standard_header_rows(self):
         self.header_rows = []
 
-    
+    def refresh_custom_header_ui(self):
+        if not hasattr(self, 'header_grid_fr') or self.header_grid_fr is None:
+            return
+        for w in self.header_grid_fr.winfo_children(): w.destroy()
+
+        custom_exists = False
+        for i, row in enumerate(self.header_rows):
+            if row.get('type') == 'standard': continue
+            custom_exists = True
+            
+            fr = ttk.Frame(self.header_grid_fr)
+            fr.pack(fill='x', pady=2)
+            
+            if 'l_label_var' not in row:
+                row['l_label_var'] = tk.StringVar(value=row.get('l_label', ''))
+            if 'r_label_var' not in row:
+                row['r_label_var'] = tk.StringVar(value=row.get('r_label', ''))
+            if 'l_val' not in row:
+                row['l_val'] = tk.StringVar()
+            elif not isinstance(row['l_val'], (tk.StringVar, tk.Variable)):
+                row['l_val'] = tk.StringVar(value=str(row['l_val']))
+            if 'r_val' not in row:
+                row['r_val'] = tk.StringVar()
+            elif not isinstance(row['r_val'], (tk.StringVar, tk.Variable)):
+                row['r_val'] = tk.StringVar(value=str(row['r_val']))
+
+            if row['type'] == 'full':
+                ttk.Label(fr, text="Full Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
+                ttk.Entry(fr, textvariable=row['l_label_var'], width=15).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['l_val'], width=40).pack(side='left', padx=2, fill='x', expand=True)
+                
+            elif row['type'] == 'split':
+                ttk.Label(fr, text="Split Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
+                # Left
+                ttk.Entry(fr, textvariable=row['l_label_var'], width=12).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['l_val'], width=20).pack(side='left', padx=2)
+                ttk.Label(fr, text="|", font=('Arial', 12, 'bold')).pack(side='left', padx=5)
+                # Right
+                ttk.Entry(fr, textvariable=row['r_label_var'], width=12).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['r_val'], width=20).pack(side='left', padx=2)
+
+        if not custom_exists:
+            pass
+
+    # --- Database ---
     def init_database(self):
         try:
             import sqlite3
-            self.db_name = "TaxInvoice_Manager.db"
+            self.db_name = "AdvanceCommercialInvoice_Manager.db"
             self.conn = sqlite3.connect(get_db_path(self.db_name))
             self.cursor = self.conn.cursor()
             # Ensure the table exists in this database
             self.cursor.execute("""
-                CREATE TABLE IF NOT EXISTS tax_invoices (
+                CREATE TABLE IF NOT EXISTS advance_commercial_invoices (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ref_no TEXT UNIQUE,
                     client_name TEXT,
@@ -167,28 +223,9 @@ class InvoiceApp(QuotationApp):
                 )
             """)
             self.conn.commit()
-            print("✅ Connected to separate database TaxInvoice_Manager.db")
+            print("✅ Connected to separate database AdvanceCommercialInvoice_Manager.db")
         except Exception as e:
-            print(f"DB Connection Error: {e}")
-
-    def auto_save_loop(self):
-        """Optimized auto-save: Avoids threading for SQLite to prevent cursor errors"""
-        try:
-            if not self.root.winfo_exists():
-                return
-        except: return
-
-        if (hasattr(self, 'client_name_var') and 
-            self.client_name_var.get().strip() and 
-            len(self.items_data) > 0):
-             # Run save directly but silently. 
-             # SQLite doesn't like multi-threading with same connection.
-             self.save_to_database(silent=True)
-             
-        try:
-            if self.root.winfo_exists():
-                self.auto_save_timer = self.root.after(10000, self.auto_save_loop)
-        except: pass
+            messagebox.showerror("Database Error", f"SQL Server Connection Failed:\n{e}")
 
     def go_to_dashboard(self):
         self.on_closing() 
@@ -197,35 +234,17 @@ class InvoiceApp(QuotationApp):
         orig_root = getattr(self, 'original_root', None)
         self.on_closing()
         if orig_root:
-            from src.components.invoice_selector import open_invoice_hub
+            from src.components.advance_commercial_selector import open_advance_commercial_hub
             orig_root.withdraw()
-            open_invoice_hub(orig_root)
+            open_advance_commercial_hub(orig_root)
 
-    def on_closing(self):
-        """Optimized closing: Instantly restores dashboard and saves cleanly"""
-        if not self.confirm_and_save_before_closing():
-            return # Abort!
-            
-        try:
-            if hasattr(self, 'auto_save_timer') and self.auto_save_timer:
-                self.root.after_cancel(self.auto_save_timer)
-            
-            # 1. Restore dashboard immediately
-            if hasattr(self, 'original_root') and self.original_root:
-                try: self.original_root.deiconify()
-                except: pass
-            
-            print("✅ Invoice closure clean")
-        except Exception as e:
-            print(f"Close warning: {e}")
-        finally:
-            try: self.root.destroy()
-            except: pass
-
+    # =========================================================
+    #  3. HEADER GUI
+    # =========================================================
     def _build_header_section(self, parent):
         main_box = ttk.Frame(parent)
         main_box.pack(fill='x', pady=5)
-        self.items_section_frame = main_box
+
         # 1. Action Buttons
         btn_fr = ttk.Frame(main_box)
         btn_fr.pack(fill='x', pady=2)
@@ -233,9 +252,7 @@ class InvoiceApp(QuotationApp):
         ttk.Button(btn_fr, text="📊 Back to Dashboard", command=self.go_to_dashboard).pack(side='left', padx=5)
         ttk.Button(btn_fr, text="📂 Open Saved/History", command=self.open_history_hub).pack(side='left', padx=5)
         
-        # ✅ FIXED: "Manage Header Rows" Button Restored
         ttk.Button(btn_fr, text="📑 Manage Header Rows", command=self.open_header_manager).pack(side='left', padx=5)
-        
         ttk.Button(btn_fr, text="🛠 Manage Columns", command=self.open_column_manager).pack(side='right', padx=5)
 
         # 2. TOP HEADER GRID
@@ -252,7 +269,7 @@ class InvoiceApp(QuotationApp):
         self.header_logo_lbl.pack(side='left', pady=2)
 
         # --- CENTER: TITLE ---
-        tk.Label(top_grid, text="Sales Tax Invoice", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
+        tk.Label(top_grid, text="Advance Commercial Invoice", font=("Arial", 26, "bold", "underline"), bg="white").grid(row=0, column=1)
 
         # --- INVOICE NO & DATE ---
         meta_fr = ttk.Frame(top_grid)
@@ -292,7 +309,7 @@ class InvoiceApp(QuotationApp):
                 tk.Label(lg, text=l2, font=("Arial", 9, "bold"), bg="white", anchor='w').grid(row=idx, column=2, sticky='nsew', padx=1, pady=1)
                 tk.Entry(lg, textvariable=v2, bd=1, relief="solid").grid(row=idx, column=3, sticky='nsew', padx=1, pady=1)
 
-        l_row(0, "Sale Tax Invoice No:", self.details_doc_no_var, "PO No.", self.rfq_no_var)
+        l_row(0, "Commercial Invoice No:", self.details_doc_no_var, "PO No.", self.rfq_no_var)
         l_row(1, "Customer:", self.client_name_var, "S.T.N. NO:", self.client_stn_var)
         l_row(2, "Address:", self.client_addr_var, "NTN:", self.client_ntn_var)
         l_row(3, "Contact person:", self.client_contact_var, "Delivery date:", self.delivery_date_var)
@@ -320,58 +337,10 @@ class InvoiceApp(QuotationApp):
         r_row(5, "email:", self.vendor_email_var)
 
         # --- CUSTOM HEADER GRID ---
-        # Holds the dynamic rows added via "Manage Header Rows".
-        self.header_grid_fr = tk.Frame(main_box, bg="white")
+        self.header_grid_fr = tk.Frame(main_box, bg="white") 
         self.header_grid_fr.pack(fill='x', padx=5, pady=5)
         self.refresh_custom_header_ui()
 
-    def refresh_custom_header_ui(self):
-        # Renders ONLY the custom (split/full) rows into header_grid_fr.
-        # The standard client/vendor fields are already drawn by the detail tables above.
-        if not hasattr(self, 'header_grid_fr') or self.header_grid_fr is None:
-            return
-        for w in self.header_grid_fr.winfo_children(): w.destroy()
-
-        for i, row in enumerate(self.header_rows):
-            if row.get('type') == 'standard': continue
-
-            fr = ttk.Frame(self.header_grid_fr)
-            fr.pack(fill='x', pady=2)
-
-            # Normalise into tk variables so edits in the grid stick.
-            if 'l_label_var' not in row:
-                row['l_label_var'] = tk.StringVar(value=row.get('l_label', ''))
-            if 'r_label_var' not in row:
-                row['r_label_var'] = tk.StringVar(value=row.get('r_label', ''))
-            if 'l_val' not in row:
-                row['l_val'] = tk.StringVar()
-            elif not isinstance(row['l_val'], (tk.StringVar, tk.Variable)):
-                row['l_val'] = tk.StringVar(value=str(row['l_val']))
-            if 'r_val' not in row:
-                row['r_val'] = tk.StringVar()
-            elif not isinstance(row['r_val'], (tk.StringVar, tk.Variable)):
-                row['r_val'] = tk.StringVar(value=str(row['r_val']))
-
-            if row['type'] == 'full':
-                ttk.Label(fr, text="Full Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
-                ttk.Entry(fr, textvariable=row['l_label_var'], width=15).pack(side='left', padx=2)
-                ttk.Entry(fr, textvariable=row['l_val'], width=40).pack(side='left', padx=2, fill='x', expand=True)
-
-            elif row['type'] == 'split':
-                ttk.Label(fr, text="Split Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
-                # Left
-                ttk.Entry(fr, textvariable=row['l_label_var'], width=12).pack(side='left', padx=2)
-                ttk.Entry(fr, textvariable=row['l_val'], width=20).pack(side='left', padx=2)
-                ttk.Label(fr, text="|", font=('Arial', 12, 'bold')).pack(side='left', padx=5)
-                # Right
-                ttk.Entry(fr, textvariable=row['r_label_var'], width=12).pack(side='left', padx=2)
-                ttk.Entry(fr, textvariable=row['r_val'], width=20).pack(side='left', padx=2)
-
-    def refresh_items_ui_structure(self):
-        super().refresh_items_ui_structure()
-        # Naye Treeview par binding dobara apply karein
-        if hasattr(self, 'tree'):
-            self.tree.bind("<Double-1>", self.on_tree_double_click)
     # =========================================================
     #  4. BOTTOM SECTION
     # =========================================================
@@ -456,12 +425,8 @@ class InvoiceApp(QuotationApp):
         
         r_txt = ttk.Frame(ft_box); r_txt.pack(fill='x', pady=2)
         tk.Label(r_txt, text="Text:").pack(side='left')
-        ttk.Entry(r_txt, textvariable=self.footer_text_var).pack(side='left', fill='x', expand=True, padx=(0,5))
-        
-        # New Row for Options (Full Width & Pin Bottom)
-        r_opt = ttk.Frame(ft_box); r_opt.pack(fill='x', pady=2)
-        ttk.Checkbutton(r_opt, text="Full Width", variable=self.footer_full_width_var).pack(side='left', padx=5)
-        ttk.Checkbutton(r_opt, text="Pin to Bottom", variable=self.footer_pin_to_bottom_var).pack(side='left', padx=5)
+        ttk.Entry(r_txt, textvariable=self.footer_text_var).pack(side='left', fill='x', expand=True)
+        ttk.Checkbutton(r_txt, text="Full", variable=self.footer_full_width_var).pack(side='left')
         
         r_aln = ttk.Frame(ft_box); r_aln.pack(fill='x', pady=2)
         tk.Label(r_aln, text="Align:").pack(side='left')
@@ -516,7 +481,7 @@ class InvoiceApp(QuotationApp):
     def _generate_pdf(self, path, pre_fetched_terms=None, ui_data_payload=None):
         if not os.path.dirname(path): return
 
-        # Use payload if available, else fallback to UI thread reads (risky)
+        # Use payload if available, else fallback to UI thread reads
         d = ui_data_payload if ui_data_payload else {}
         
         # Helper to get from d or self
@@ -534,6 +499,7 @@ class InvoiceApp(QuotationApp):
         from reportlab.lib import colors
 
         MARGIN = 20 
+
         # Footer Pre-calculation for Dynamically Adjusted Margin
         f_h_pts = 0
         t_foot = None
@@ -541,62 +507,64 @@ class InvoiceApp(QuotationApp):
              styles = getSampleStyleSheet(); norm_style = styles['Normal']
              f_txt = Paragraph(self.footer_text_var.get(), norm_style) 
              t_style = [('VALIGN', (0,0), (-1,-1), 'MIDDLE')]
-             align_val = {"Left": 'LEFT', "Right": 'RIGHT', "Center": 'CENTER'}.get(self.footer_align_var.get(), 'CENTER')
+             align_map = {"Left": 'LEFT', "Right": 'RIGHT', "Center": 'CENTER'}
+             align_val = align_map.get(self.footer_align_var.get(), 'CENTER')
              t_style.append(('ALIGN', (0,0), (-1,-1), align_val))
              
              if self.footer_logo_path:
-                 target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
-                 img = self._get_scaled_image(self.footer_logo_path, target_w)
-                 t_foot = Table([[f_txt], [img]], colWidths=[540])
+                  target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
+                  img = self._get_scaled_image(self.footer_logo_path, target_w)
+                  t_foot = Table([[f_txt], [img]], colWidths=[540])
              else:
-                 t_foot = Table([[f_txt]], colWidths=[540])
+                  t_foot = Table([[f_txt]], colWidths=[540])
              
              t_foot.setStyle(TableStyle(t_style))
              t_foot.wrapOn(None, 540, A4[1])
              f_h_pts = getattr(t_foot, '_height', 40) + 10
 
+        # Increased Margin for Letterhead
         doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=MARGIN, leftMargin=MARGIN, 
                                 topMargin=0.4*inch, bottomMargin=max(1.5*inch, MARGIN + f_h_pts))
         elements = []
         styles = getSampleStyleSheet()
         norm_style = styles['Normal']
         
-        # Description Style: Text ko automatic next line par bhejne ke liye
-        desc_style = ParagraphStyle('desc', parent=norm_style, fontSize=9, leading=11)
-        
-        # --- HEADER SECTION ---
+        # --- HEADER ---
         styles = getSampleStyleSheet()
         norm_style = styles['Normal']
         
-        img_left = self._get_scaled_image(self.header_logo_path, 1.2) if self.header_logo_path else ""
-        img_right = self._get_scaled_image(self.header_logo_right_path, 1.2) if self.header_logo_right_path else ""
+        img_left = self._get_scaled_image(get_v('h_logo', 'header_logo_path'), 1.2) if get_v('h_logo', 'header_logo_path') else ""
+        img_right = self._get_scaled_image(get_v('h_logo_r', 'header_logo_right_path'), 1.2) if get_v('h_logo_r', 'header_logo_right_path') else ""
         
         title_style = ParagraphStyle('Title', parent=norm_style, fontName='Helvetica-Bold', fontSize=22, alignment=TA_CENTER)
-        title_p = Paragraph("Sales Tax Invoice", title_style)
+        title_p = Paragraph("Advance Commercial Invoice", title_style)
         
         cw = 540 
         h_data = [[img_left, title_p, img_right]]
-        t_head = Table(h_data, colWidths=[cw*0.25, cw*0.5, cw*0.25])
+        t_head = Table(h_data, colWidths=[cw*0.12, cw*0.76, cw*0.12])
         t_head.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
             ('ALIGN', (0,0), (0,0), 'LEFT'),
             ('ALIGN', (1,0), (1,0), 'CENTER'),
             ('ALIGN', (2,0), (2,0), 'RIGHT'),
-            ('TOPPADDING', (1,0), (1,0), 5),#previous value is 45
+            ('TOPPADDING', (1,0), (1,0), 5),
         ]))
         elements.append(t_head)
         elements.append(Spacer(1, 0.3*inch))
 
-        # --- INFO TABLE SECTION (Consolidated Single Table for Perfect Alignment) ---
+        # --- INFO TABLE ---
         def mk_b(txt): return Paragraph(f"<b>{txt}</b>", ParagraphStyle('b', parent=norm_style, fontSize=9))
         def mk_n(txt): return Paragraph(f"{txt}", ParagraphStyle('n', parent=norm_style, fontSize=9))
         
-        # Build one big grid to avoid sticking lines
-        h_data = []
-        
-        # Details Rows (L + R fused)
-        # L has 4 cols, R has 2 cols. Total 6 cols.
-        rd = [
+        l_data = [
+            [mk_b("Commercial Invoice No"), mk_n(get_v('quot_no', 'quotation_no_var')), mk_b("PO No."), mk_n(get_v('rf_no', 'rfq_no_var'))],
+            [mk_b("Customer"), mk_n(get_v('c_name', 'client_name_var')), mk_b("S.T.N. NO:"), mk_n(get_v('c_stn', 'client_stn_var'))],
+            [mk_b("Address"), mk_n(get_v('c_addr', 'client_addr_var')), mk_b("NTN:"), mk_n(get_v('c_ntn', 'client_ntn_var'))],
+            [mk_b("Contact person"), mk_n(get_v('c_contact', 'client_contact_var')), mk_b("Delivery date"), mk_n(get_v('d_date', 'delivery_date_var'))],
+            [mk_b("Designation"), mk_n(get_v('c_desig', 'client_designation_var')), mk_b("Delivered Through"), mk_n(get_v('d_through', 'delivered_through_var'))],
+            [mk_b("email"), mk_n(get_v('c_email', 'client_email_var')), "", ""]
+        ]
+        r_data = [
             [mk_b("Quotation No."), mk_n(get_v('ref_quot_no', 'ref_quot_no_var'))],
             [mk_b("DC No"), mk_n(get_v('dc_no', 'dc_no_var'))],
             [mk_b("S.T.N. No."), mk_n(get_v('v_stn', 'vendor_stn_var'))],
@@ -604,51 +572,43 @@ class InvoiceApp(QuotationApp):
             [mk_b("PRA"), mk_n(get_v('v_pra', 'vendor_pra_var'))],
             [mk_b("email"), mk_n(get_v('v_email', 'vendor_email_var'))]
         ]
-        
-        ld = [
-            [mk_b("Sales Tax Invoice No"), mk_n(get_v('quot_no', 'quotation_no_var')), mk_b("PO No."), mk_n(get_v('rf_no', 'rfq_no_var'))],
-            [mk_b("Customer"), mk_n(get_v('c_name', 'client_name_var')), mk_b("S.T.N. NO:"), mk_n(get_v('c_stn', 'client_stn_var'))],
-            [mk_b("Address"), mk_n(get_v('c_addr', 'client_addr_var')), mk_b("NTN:"), mk_n(get_v('c_ntn', 'client_ntn_var'))],
-            [mk_b("Contact person"), mk_n(get_v('c_contact', 'client_contact_var')), mk_b("Delivery date"), mk_n(get_v('d_date', 'delivery_date_var'))],
-            [mk_b("Designation"), mk_n(get_v('c_desig', 'client_designation_var')), mk_b("Delivered Through"), mk_n(get_v('d_through', 'delivered_through_var'))],
-            [mk_b("email"), mk_n(get_v('c_email', 'client_email_var')), "", ""]
-        ]
 
-        for i in range(6):
-            h_data.append(ld[i] + rd[i])
-
-        titles = [
-            Paragraph(f"<b>{get_v('l_title', 'left_header_title')}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11)),
-            "", "", "",
-            Paragraph(f"<b>{get_v('r_title', 'right_header_title')}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11)),
-            ""
-        ]
-        
-        final_h_data = [titles] + h_data
-
-        t_main = Table(final_h_data, colWidths=[85, 120, 75, 95, 70, 95]) # Total 540
-        t_main.setStyle(TableStyle([
+        t_left = Table(l_data, colWidths=[1.1*inch, 1.5*inch, 1.0*inch, 1.2*inch])
+        t_left.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-            ('BOX', (0,0), (-1,-1), 1, colors.black),
-            ('SPAN', (0,0), (3,0)), # Left Title
-            ('SPAN', (4,0), (5,0)), # Right Title
-            ('SPAN', (1,6), (3,6)), # Left Email Span
             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BACKGROUND', (0,0), (0,-1), colors.whitesmoke), 
+            ('BACKGROUND', (2,0), (2,-2), colors.whitesmoke),
+            ('SPAN', (1,5), (3,5)) 
+        ]))
+
+        t_right = Table(r_data, colWidths=[1.0*inch, 1.5*inch])
+        t_right.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('BACKGROUND', (0,0), (0,-1), colors.whitesmoke)
+        ]))
+
+        l_title = Paragraph(f"<b>{self.left_header_title.get()}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11))
+        r_title = Paragraph(f"<b>{self.right_header_title.get()}</b>", ParagraphStyle('c', alignment=TA_CENTER, fontSize=11))
+        
+        t_main = Table([[l_title, r_title],[t_left, t_right]], colWidths=[4.9*inch, 2.6*inch])
+        t_main.setStyle(TableStyle([
+            ('BOX', (0,0), (-1,-1), 1, colors.black), 
+            ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+            ('LINEAFTER', (0,0), (0,-1), 1, colors.black), 
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('ALIGN', (0,0), (-1,0), 'CENTER'),
-            ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke), # Row 1 bg
-            ('BACKGROUND', (0,1), (0,6), colors.whitesmoke), # L-Label bg
-            ('BACKGROUND', (2,1), (2,5), colors.whitesmoke), # L-Mid-Label bg
-            ('BACKGROUND', (4,1), (4,6), colors.whitesmoke), # R-Label bg
-            ('TOPPADDING', (0,0), (-1,-1), 3),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+            ('TOPPADDING', (0,0), (-1,-1), 5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 5),
         ]))
         elements.append(t_main)
         elements.append(Spacer(1, 15))
 
-        # --- CUSTOM HEADER ROWS TABLE ---
+        # Custom header rows table
         custom_header_data = []
         custom_rows_to_use = ui_data_payload.get("custom_header_rows", []) if ui_data_payload else None
-
+        
         if custom_rows_to_use is None:
             custom_rows_to_use = []
             for r in self.header_rows:
@@ -660,30 +620,30 @@ class InvoiceApp(QuotationApp):
                     "l_val": r.get("l_val").get().strip() if isinstance(r.get("l_val"), tk.Variable) else str(r.get("l_val", "")).strip(),
                     "r_val": r.get("r_val").get().strip() if isinstance(r.get("r_val"), tk.Variable) else str(r.get("r_val", "")).strip()
                 })
-
+                
         for row_cfg in custom_rows_to_use:
             l_val = row_cfg.get('l_val', "")
             r_val = row_cfg.get('r_val', "")
             l_lbl = row_cfg.get('l_label', "")
             r_lbl = row_cfg.get('r_label', "")
-
+            
             show_l = (l_lbl != "" or l_val != "")
             show_r = (r_lbl != "" or r_val != "")
 
             if not show_l and not show_r: continue
-
+            
             if row_cfg.get('type') == 'full':
-                custom_header_data.append([
-                    Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style),
-                    ""
-                ])
+                 custom_header_data.append([
+                     Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style),
+                     ""
+                 ])
             else:
-                p_l = Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style) if show_l else ""
-                p_r = Paragraph(f"<b>{r_lbl}</b> {r_val}", norm_style) if show_r else ""
-                custom_header_data.append([p_l, p_r])
-
+                 p_l = Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style) if show_l else ""
+                 p_r = Paragraph(f"<b>{r_lbl}</b> {r_val}", norm_style) if show_r else ""
+                 custom_header_data.append([p_l, p_r])
+        
         if custom_header_data:
-            t_dyn_header = Table(custom_header_data, colWidths=[270, 270])
+            t_dyn_header = Table(custom_header_data, colWidths=[CW*0.5, CW*0.5])
             t_dyn_header.setStyle(TableStyle([
                 ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -704,13 +664,23 @@ class InvoiceApp(QuotationApp):
         item_head_style = ParagraphStyle('ItemHead', parent=item_norm_style, fontName='Helvetica-Bold', alignment=TA_CENTER)
         item_num_style = ParagraphStyle('ItemNum', parent=item_norm_style, alignment=TA_RIGHT)
 
-        headers = [Paragraph(f"<b>{c['label']}</b>", item_head_style) for c in print_cols]
+        # Build Headers
+        headers = []
+        for c in print_cols:
+            lbl = c['label']
+            if c['id'] == 'gst': 
+                try:
+                    rate = self.gst_rate_var.get()
+                    rate_str = f"{int(rate)}" if rate.is_integer() else f"{rate}"
+                    lbl = f"GST ({rate_str}%)"
+                except: lbl = "GST"
+            headers.append(Paragraph(f"<b>{lbl}</b>", item_head_style))
+        
         data = [headers]
         total_tax_calc = 0.0
 
-        # DYNAMIC COLUMN WIDTH LOGIC: PROPORTIONAL SCALING
-        # Treats user-defined widths in 'Manage Columns' as weights
-        CW = 540 # Content Width
+        # DYNAMIC COLUMN WIDTH LOGIC
+        CW = 540 # Total Page Content Width
         
         # 1. Get Raw Widths from Config
         raw_widths = [float(c.get('width', 50)) for c in print_cols]
@@ -734,8 +704,6 @@ class InvoiceApp(QuotationApp):
                         val = f"{float(val):,.2f}"
                         p_style = item_num_style
                     except: pass
-                
-                # Use Paragraph to ensure wrapping and no overlapping
                 row.append(Paragraph(str(val).replace("\n", "<br/>"), p_style))
             data.append(row)
         
@@ -754,11 +722,6 @@ class InvoiceApp(QuotationApp):
         # --- FINANCIAL SUMMARY TABLE (Conditional) ---
         summary_data = []
         curr = self.currency_symbol_var.get()
-        
-        # We need to access the variables from the parent or self if they exist
-        # Since InvoiceApp inherits QuotationApp, it should have them if initialized correctly.
-        # However, InvoiceApp might be using its own 'recalc' logic or might need to ensure variables are present.
-        # Assuming variables are available from QuotationApp.__init__ or we need to gracefully fallback.
         
         # Sub Total
         if hasattr(self, 'print_subtotal_var') and self.print_subtotal_var.get():
@@ -806,22 +769,11 @@ class InvoiceApp(QuotationApp):
 
         elements.append(Spacer(1, 20))
 
-        # --- SIGNATURES & TAX SECTION ---
-        from reportlab.platypus import KeepTogether
-        footer_elements = []
-
-        curr = self.currency_symbol_var.get()
-        tax_str = f"{curr} {total_tax_calc:,.2f}"
-
-        tax_para = Paragraph(f"<b>Total Sales Tax:</b> <font color='#c0392b'>{tax_str}</font>", norm_style)
-        footer_elements.append(tax_para)
-        footer_elements.append(Spacer(1, 40))
-
-        # --- TERMS & SIGNATURES BLOCK (KeepTogether protection) ---
+        # --- TERMS & SIGNATURES BLOCK ---
         footer_elements = []
         footer_elements.append(Spacer(1, 15))
         
-        # Terms & Conditions (RESTORED)
+        # Terms & Conditions
         footer_elements.append(Paragraph("<b>Terms & Conditions:</b>", ParagraphStyle('BT', parent=norm_style, fontSize=10)))
         terms_content = pre_fetched_terms if pre_fetched_terms is not None else self._get_tagged_text()
         footer_elements.append(Paragraph(terms_content, ParagraphStyle('BC', parent=norm_style, fontSize=9)))
@@ -830,22 +782,16 @@ class InvoiceApp(QuotationApp):
         # Prepared / Approved By with Red Note
         footer_elements.append(Spacer(1, 50))
         
-        # Create styles for signature block
-        sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=8, alignment=TA_LEFT)
-        sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=8, alignment=TA_RIGHT)
-        sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=7)
-        
-        is_quotation = self.__class__.__name__ == "QuotationApp"
-        # Note Text
-        note_text = "Note: This is a system generated document so no need to sign."
+        sig_style_left = ParagraphStyle('SigL', parent=norm_style, fontSize=10, alignment=TA_LEFT)
+        sig_style_right = ParagraphStyle('SigR', parent=norm_style, fontSize=10, alignment=TA_RIGHT)
+        sig_style_center = ParagraphStyle('SigC', parent=norm_style, fontSize=9, alignment=TA_CENTER)
         
         sig_data = [[
-            Paragraph("<b>Prepared By:</b> _________________", sig_style_left),
-            Paragraph(f"<font color='red'><b>Note:</b></font> {note_text}", sig_style_center),
-            Paragraph("<b>Approved By:</b> _________________", sig_style_right)
+            Paragraph("_________________<br/><b>Prepared By</b>", sig_style_left),
+            Paragraph("<b><font color='red'>Note:</font></b> This is a system generated document so no need to sign.", sig_style_center),
+            Paragraph("_________________<br/><b>Approved By</b>", sig_style_right)
         ]]
         
-        # Reduce gap: 25% + 50% + 25% layout
         t_sig = Table(sig_data, colWidths=[CW*0.25, CW*0.5, CW*0.25])
         t_sig.setStyle(TableStyle([
             ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
@@ -858,33 +804,29 @@ class InvoiceApp(QuotationApp):
         ]))
         footer_elements.append(t_sig)
         
-        sys_gen_style = ParagraphStyle('SysGen', parent=styles['Normal'], fontSize=8, alignment=TA_CENTER, textColor=colors.grey)
-        # footer_elements.append(Paragraph("This is a system generated document so no need to sign.", sys_gen_style))
-        
         elements.append(KeepTogether(footer_elements))
-
         elements.append(Spacer(1, 10))
 
-        # --- QR CODE & SOCIAL ICONS SETUP ---
+        # --- CANVAS DRAWING ---
         website_link = "https://www.orientmarketing.com.pk/"
         qr_string = f"Invoice No: {self.quotation_no_var.get()}\nDate: {self.doc_date_var.get()}\nClient: {self.client_name_var.get()}\nNet Amount: {self.grand_total_var.get()}\n{website_link}"
         qr_img = self._generate_qr_code(qr_string, size_inch=0.5)
-
         
-        # Pinned Footer Logic
+        # Pre-calc footer for pinning logic
         t_foot = None
         if self.footer_text_var.get() or self.footer_logo_path:
              f_txt = Paragraph(self.footer_text_var.get(), norm_style) 
              t_style = [('VALIGN', (0,0), (-1,-1), 'MIDDLE')]
-             align_val = {"Left": 'LEFT', "Right": 'RIGHT', "Center": 'CENTER'}.get(self.footer_align_var.get(), 'CENTER')
+             align_map = {"Left": 'LEFT', "Right": 'RIGHT', "Center": 'CENTER'}
+             align_val = align_map.get(self.footer_align_var.get(), 'CENTER')
              t_style.append(('ALIGN', (0,0), (-1,-1), align_val))
              
              if self.footer_logo_path:
-                 target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
-                 img = self._get_scaled_image(self.footer_logo_path, target_w)
-                 t_foot = Table([[f_txt], [img]], colWidths=[540])
+                  target_w = 540 / inch if self.footer_full_width_var.get() else self.f_logo_size_var.get()
+                  img = self._get_scaled_image(self.footer_logo_path, target_w)
+                  t_foot = Table([[f_txt], [img]], colWidths=[540])
              else:
-                 t_foot = Table([[f_txt]], colWidths=[540])
+                  t_foot = Table([[f_txt]], colWidths=[540])
              
              t_foot.setStyle(TableStyle(t_style))
              t_foot.wrapOn(None, 540, A4[1])
@@ -893,13 +835,17 @@ class InvoiceApp(QuotationApp):
             self.last_pdf_pages = canvas.getPageNumber()
             page_width, page_height = A4
             
+            # Draw pinned footer if enabled
             if t_foot and self.footer_pin_to_bottom_var.get():
                 t_foot.drawOn(canvas, MARGIN, 10)
             
+            # Draw QR Code on bottom right corner
             if qr_img:
-                qr_img.drawOn(canvas, page_width - MARGIN - 0.5*inch, 20)
+                qr_x = page_width - MARGIN - 0.5*inch 
+                qr_y = 20 # Bottom Margin
+                qr_img.drawOn(canvas, qr_x, qr_y)
 
-            
+            # Draw Social Media Icons on bottom left
             try:
                 icon_size = 16
                 social_x = MARGIN
@@ -918,7 +864,6 @@ class InvoiceApp(QuotationApp):
                     canvas.setFont("Helvetica-Bold", 10)
                     canvas.drawString(social_x + 4, y_pos + 4, symbol)
                     canvas.linkURL(url, (social_x, y_pos, social_x + icon_size, y_pos + icon_size), relative=0)
-
             except Exception as e:
                 print(f"Social icons error: {e}")
 
@@ -945,7 +890,7 @@ class InvoiceApp(QuotationApp):
             return None
 
     def on_preview_click(self):
-        """PDF Preview logic for Invoice (Multithreaded to avoid hangs)"""
+        """PDF Preview logic for Advance Commercial Invoice (Multithreaded to avoid hangs)"""
         if getattr(self, 'is_generating_pdf', False):
             return
         self.is_generating_pdf = True
@@ -957,8 +902,6 @@ class InvoiceApp(QuotationApp):
         wait.geometry("350x120")
         wait.resizable(False, False)
         wait.transient(self.root)
-        # ✅ FIX: Don't use grab_set - it blocks the UI
-        # wait.grab_set()
         
         # Center the window
         try:
@@ -969,7 +912,7 @@ class InvoiceApp(QuotationApp):
             wait.geometry(f"+{root_x + (root_w//2) - 175}+{root_y + (root_h//2) - 60}")
         except: pass
 
-        tk.Label(wait, text="🔄 Generating Invoice PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
+        tk.Label(wait, text="🔄 Generating Advance Commercial PDF...", font=("Arial", 12, "bold"), fg="#2c3e50").pack(pady=10)
         tk.Label(wait, text="This might take a few seconds...", font=("Arial", 9), fg="grey").pack()
         
         try:
@@ -977,7 +920,7 @@ class InvoiceApp(QuotationApp):
         except:
             tagged_terms = ""
 
-        # Pre-fetch all UI variables to avoid thread-safety issues
+        # Pre-fetch for thread safety
         ui_data = {
             "l_title": self.left_header_title.get(),
             "r_title": self.right_header_title.get(),
@@ -999,19 +942,11 @@ class InvoiceApp(QuotationApp):
             "v_ntn": self.vendor_ntn_var.get(),
             "v_pra": self.vendor_pra_var.get(),
             "v_email": self.vendor_email_var.get(),
-            "currency": self.currency_symbol_var.get(),
-            "g_total": self.grand_total_var.get() if hasattr(self, 'grand_total_var') else "0.00",
-            "footer_text": self.footer_text_var.get(),
-            "footer_align": self.footer_align_var.get(),
-            "footer_size": self.f_logo_size_var.get(),
-            "print_sub": self.print_subtotal_var.get(),
-            "print_tax": self.print_tax_var.get(),
-            "print_gt": self.print_grand_total_var.get(),
-            "subtotal": self.subtotal_var.get() if hasattr(self, 'subtotal_var') else "0.00",
-            "tax_total": self.tax_total_var.get() if hasattr(self, 'tax_total_var') else "0.00"
+            "h_logo": self.header_logo_path,
+            "h_logo_r": self.header_logo_right_path
         }
 
-        # Pre-fetch custom header rows for thread-safe access inside the PDF worker.
+        # Pre-fetch custom header rows for thread-safe access
         pre_fetched_header_rows = []
         for r in self.header_rows:
             if r.get('type') == 'standard': continue
@@ -1037,7 +972,7 @@ class InvoiceApp(QuotationApp):
                 fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
                 os.close(fd)
                 
-                # Pass both terms and full payload
+                # Pass both terms and payload
                 self._generate_pdf(tmp_path, pre_fetched_terms=tagged_terms, ui_data_payload=ui_data) 
                 
                 if os.path.exists(tmp_path):
@@ -1050,92 +985,117 @@ class InvoiceApp(QuotationApp):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _open_pdf(self, path):
+        try:
+            if os.name == 'nt':
+                os.startfile(path)
+            else:
+                import webbrowser
+                webbrowser.open("file://" + path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open PDF: {e}")
+
     # --- Save & Utils ---
     def check_license(self): pass 
     def check_user_login(self): pass
     
+    # --- SAVE ---
     def save_to_database(self, silent=False):
-        # Agar connection nahi hai to wapis
+        if not self.client_name_var.get().strip():
+            if not silent: messagebox.showerror("Error", "Client Name Required")
+            return False
+        
+        # Ensure connection
         if not hasattr(self, 'cursor'): self.init_database()
-        
-        # Serialize custom header rows so they survive save/reload.
-        serialized_header_rows = []
-        for r in self.header_rows:
-            if r.get('type') == 'standard': continue
-            serialized_header_rows.append({
-                "type": r.get("type"),
-                "bg": r.get("bg", "#ffffff"),
-                "fg": r.get("fg", "#000000"),
-                "l_label": r.get("l_label_var").get() if "l_label_var" in r else r.get("l_label", ""),
-                "r_label": r.get("r_label_var").get() if "r_label_var" in r else r.get("r_label", ""),
-                "l_val": r.get("l_val").get() if isinstance(r.get("l_val"), tk.Variable) else r.get("l_val", ""),
-                "r_val": r.get("r_val").get() if isinstance(r.get("r_val"), tk.Variable) else r.get("r_val", "")
+            
+        try:
+            # Serialize custom header rows
+            serialized_header_rows = []
+            for r in self.header_rows:
+                if r.get('type') == 'standard': continue
+                serialized_header_rows.append({
+                    "type": r.get("type"),
+                    "bg": r.get("bg", "#ffffff"),
+                    "fg": r.get("fg", "#000000"),
+                    "l_label": r.get("l_label_var").get() if "l_label_var" in r else r.get("l_label", ""),
+                    "r_label": r.get("r_label_var").get() if "r_label_var" in r else r.get("r_label", ""),
+                    "l_val": r.get("l_val").get() if isinstance(r.get("l_val"), tk.Variable) else r.get("l_val", ""),
+                    "r_val": r.get("r_val").get() if isinstance(r.get("r_val"), tk.Variable) else r.get("r_val", "")
+                })
+
+            full_data = json.dumps({
+                "header": {
+                    "inv_no": self.quotation_no_var.get(), 
+                    "details_doc_no": self.details_doc_no_var.get(),
+                    "client": self.client_name_var.get(),
+                    "date": self.doc_date_var.get(),
+                    "po_no": self.rfq_no_var.get(),
+                    "cl_stn": self.client_stn_var.get(),
+                    "cl_ntn": self.client_ntn_var.get(),
+                    "del_date": self.delivery_date_var.get(),
+                    "delivered_through": self.delivered_through_var.get(), 
+                    "mill": self.mill_code_var.get(),
+                    "demand": self.demand_no_var.get(),
+                    "ref_q": self.ref_quot_no_var.get(),
+                    "dc": self.dc_no_var.get(),
+                    "vn_stn": self.vendor_stn_var.get(),
+                    "vn_ntn": self.vendor_ntn_var.get(),
+                    "vn_pra": self.vendor_pra_var.get(), 
+                    "left_title": self.left_header_title.get(), 
+                    "right_title": self.right_header_title.get(),
+                    "footer_txt": self.footer_text_var.get(),
+                    "footer_align": self.footer_align_var.get(),
+                    "footer_size": self.f_logo_size_var.get()
+                },
+                "items": self.items_data,
+                "colors": self.row_colors,
+                "terms": self.terms_txt.get("1.0", "end-1c"),
+                "header_rows": serialized_header_rows
             })
+            
+            try:
+                import re
+                match = re.search(r"[\d,]+\.?\d*", self.total_lbl.cget("text"))
+                gt = float(match.group().replace(',', '')) if match else 0.0
+            except: gt = 0.0
 
-        # Data Pack
-        import json
-        data_packet = {
-            "header": {
-                "ref_no": self.quotation_no_var.get(),
-                "date": self.doc_date_var.get(),
-                "client_name": self.client_name_var.get(),
-                "details_doc_no": self.details_doc_no_var.get()
-            },
-            "items": self.items_data,
-            "header_rows": serialized_header_rows
-        }
-        json_str = json.dumps(data_packet)
-        
-        # Total Value Calculate
-        try:
-            import re
-            txt = self.total_lbl.cget("text")
-            match = re.search(r"[\d,]+\.?\d*", txt)
-            val = float(match.group().replace(',','')) if match else 0.0
-        except: val = 0.0
-
-        try:
-            # Table: tax_invoices
             if self.current_db_id:
                 self.cursor.execute("""
-                    UPDATE tax_invoices 
-                    SET ref_no=?, client_name=?, date=?, grand_total=?, full_data=?
+                    UPDATE advance_commercial_invoices 
+                    SET ref_no=?, client_name=?, date=?, grand_total=?, full_data=? 
                     WHERE id=?
-                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str, self.current_db_id))
+                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), gt, full_data, self.current_db_id))
             else:
                 # ✅ UNIQUE CHECK: Prevent "UNIQUE constraint failed"
-                self.cursor.execute("SELECT id FROM tax_invoices WHERE ref_no=?", (self.quotation_no_var.get(),))
+                self.cursor.execute("SELECT id FROM advance_commercial_invoices WHERE ref_no=?", (self.quotation_no_var.get(),))
                 exists = self.cursor.fetchone()
                 if exists:
                     if not silent: 
-                        messagebox.showerror("Duplicate Ref No", f"Invoice No '{self.quotation_no_var.get()}' already exists in database.\nPlease use a unique number.")
+                        messagebox.showerror("Duplicate Error", f"Advance Commercial Invoice No '{self.quotation_no_var.get()}' already saved!\n\nPlease use a unique number.")
                     return False
 
                 self.cursor.execute("""
-                    INSERT INTO tax_invoices (ref_no, client_name, date, grand_total, full_data)
+                    INSERT INTO advance_commercial_invoices (ref_no, client_name, date, grand_total, full_data) 
                     VALUES (?,?,?,?,?)
-                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), val, json_str))
+                """, (self.quotation_no_var.get(), self.client_name_var.get(), self.doc_date_var.get(), gt, full_data))
                 
                 self.current_db_id = self.cursor.lastrowid
-            
+
             self.conn.commit()
             self.is_saved = True
-            if not silent: messagebox.showinfo("Saved", "Invoice Database Updated!")
+            if not silent: messagebox.showinfo("Saved", "Advance Commercial Invoice Saved to SQLite!")
             return True
-            
-        except Exception as e:
-            if not silent: messagebox.showerror("DB Error", str(e))
+        except Exception as e: 
+            if not silent: messagebox.showerror("Error", str(e))
             return False
-    
-     
+
     def load_from_quotation_data(self, json_data):
         try:
             data = json.loads(json_data)
             h = data.get("header", {})
             self.rfq_no_var.set(h.get("quot_no", "")) 
             
-            # ✅ FIX: Use actual Ref No from data if available, instead of hardcoded 55
-            doc_no = h.get("ref_no") or h.get("quot_no") or "55"
+            doc_no = h.get("ref_no") or h.get("inv_no") or h.get("quot_no") or "55"
             self.quotation_no_var.set(doc_no) 
             
             self.client_name_var.set(h.get("client_name", ""))
@@ -1149,8 +1109,8 @@ class InvoiceApp(QuotationApp):
             self.ref_quot_no_var.set(h.get("quot_no", ""))
             self.items_data = data.get("items", [])
             self.row_colors = {int(k): v for k, v in data.get("colors", {}).items()}
-
-            # Deserialize custom header rows back into tk variables.
+            
+            # Deserialize custom header rows
             self.header_rows = []
             for r in data.get("header_rows", []):
                 self.header_rows.append({
@@ -1171,5 +1131,5 @@ class InvoiceApp(QuotationApp):
 
 if __name__ == "__main__":
     root = ttk.Window(themename="lumen")
-    app = InvoiceApp(root)
+    app = AdvanceCommercialApp(root)
     root.mainloop()

@@ -23,6 +23,7 @@ def get_analytics_data(conn, user=None):
             "quotations": ("Quotation", "QuotationManager_Final.db"),
             "tax_invoices": ("Tax Invoice", "TaxInvoice_Manager.db"),
             "commercial_invoices": ("Commercial Inv", "CommercialInvoice_Manager.db"),
+            "advance_commercial_invoices": ("Advance Commercial Inv", "AdvanceCommercialInvoice_Manager.db"),
             "delivery_challans": ("Delivery Challan", "DeliveryChallan_Manager.db")
         }
         

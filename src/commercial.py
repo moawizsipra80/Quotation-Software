@@ -163,6 +163,50 @@ class CommercialApp(QuotationApp):
     def _init_standard_header_rows(self):
         self.header_rows = []
 
+    def refresh_custom_header_ui(self):
+        print(f"[DEBUG] refresh_custom_header_ui called. header_grid_fr exists: {hasattr(self, 'header_grid_fr')}, header_rows count: {len(self.header_rows)}", flush=True)
+        if not hasattr(self, 'header_grid_fr') or self.header_grid_fr is None:
+            print("[DEBUG] header_grid_fr is missing or None", flush=True)
+            return
+        for w in self.header_grid_fr.winfo_children(): w.destroy()
+
+        custom_exists = False
+        for i, row in enumerate(self.header_rows):
+            if row.get('type') == 'standard': continue
+            custom_exists = True
+            print(f"[DEBUG] Row {i} type: {row.get('type')}", flush=True)
+            
+            fr = ttk.Frame(self.header_grid_fr)
+            fr.pack(fill='x', pady=2)
+            
+            if 'l_label_var' not in row:
+                row['l_label_var'] = tk.StringVar(value=row.get('l_label', ''))
+            if 'r_label_var' not in row:
+                row['r_label_var'] = tk.StringVar(value=row.get('r_label', ''))
+            if 'l_val' not in row:
+                row['l_val'] = tk.StringVar()
+            elif not isinstance(row['l_val'], (tk.StringVar, tk.Variable)):
+                row['l_val'] = tk.StringVar(value=str(row['l_val']))
+            if 'r_val' not in row:
+                row['r_val'] = tk.StringVar()
+            elif not isinstance(row['r_val'], (tk.StringVar, tk.Variable)):
+                row['r_val'] = tk.StringVar(value=str(row['r_val']))
+
+            if row['type'] == 'full':
+                ttk.Label(fr, text="Full Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
+                ttk.Entry(fr, textvariable=row['l_label_var'], width=15).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['l_val'], width=40).pack(side='left', padx=2, fill='x', expand=True)
+                
+            elif row['type'] == 'split':
+                ttk.Label(fr, text="Split Row:", width=10, font=("Segoe UI", 9, "bold")).pack(side='left')
+                # Left
+                ttk.Entry(fr, textvariable=row['l_label_var'], width=12).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['l_val'], width=20).pack(side='left', padx=2)
+                ttk.Label(fr, text="|", font=('Arial', 12, 'bold')).pack(side='left', padx=5)
+                # Right
+                ttk.Entry(fr, textvariable=row['r_label_var'], width=12).pack(side='left', padx=2)
+                ttk.Entry(fr, textvariable=row['r_val'], width=20).pack(side='left', padx=2)
+
     # --- Database ---
     def init_database(self):
         try:
@@ -296,6 +340,11 @@ class CommercialApp(QuotationApp):
         r_row(3, "NTN:", self.vendor_ntn_var)
         r_row(4, "PRA:", self.vendor_pra_var)
         r_row(5, "email:", self.vendor_email_var)
+
+        # --- CUSTOM HEADER GRID ---
+        self.header_grid_fr = tk.Frame(main_box, bg="white") 
+        self.header_grid_fr.pack(fill='x', padx=5, pady=5)
+        self.refresh_custom_header_ui()
 
     # =========================================================
     #  4. BOTTOM SECTION
@@ -560,6 +609,55 @@ class CommercialApp(QuotationApp):
         ]))
         elements.append(t_main)
         elements.append(Spacer(1, 15))
+
+        # Custom header rows table
+        custom_header_data = []
+        custom_rows_to_use = ui_data_payload.get("custom_header_rows", []) if ui_data_payload else None
+        
+        if custom_rows_to_use is None:
+            custom_rows_to_use = []
+            for r in self.header_rows:
+                if r.get('type') == 'standard': continue
+                custom_rows_to_use.append({
+                    "type": r.get("type"),
+                    "l_label": r.get("l_label_var").get().strip() if "l_label_var" in r else r.get("l_label", "").strip(),
+                    "r_label": r.get("r_label_var").get().strip() if "r_label_var" in r else r.get("r_label", "").strip(),
+                    "l_val": r.get("l_val").get().strip() if isinstance(r.get("l_val"), tk.Variable) else str(r.get("l_val", "")).strip(),
+                    "r_val": r.get("r_val").get().strip() if isinstance(r.get("r_val"), tk.Variable) else str(r.get("r_val", "")).strip()
+                })
+                
+        for row_cfg in custom_rows_to_use:
+            l_val = row_cfg.get('l_val', "")
+            r_val = row_cfg.get('r_val', "")
+            l_lbl = row_cfg.get('l_label', "")
+            r_lbl = row_cfg.get('r_label', "")
+            
+            show_l = (l_lbl != "" or l_val != "")
+            show_r = (r_lbl != "" or r_val != "")
+
+            if not show_l and not show_r: continue
+            
+            if row_cfg.get('type') == 'full':
+                 custom_header_data.append([
+                     Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style),
+                     ""
+                 ])
+            else:
+                 p_l = Paragraph(f"<b>{l_lbl}</b> {l_val}", norm_style) if show_l else ""
+                 p_r = Paragraph(f"<b>{r_lbl}</b> {r_val}", norm_style) if show_r else ""
+                 custom_header_data.append([p_l, p_r])
+        
+        if custom_header_data:
+            t_dyn_header = Table(custom_header_data, colWidths=[270, 270])
+            t_dyn_header.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('BACKGROUND', (0,0), (-1,-1), colors.whitesmoke),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+            ]))
+            elements.append(t_dyn_header)
+            elements.append(Spacer(1, 10))
 
         # 3. ITEMS TABLE
         print_cols = [c for c in self.columns_config if c.get('printable', True)]
@@ -877,6 +975,19 @@ class CommercialApp(QuotationApp):
             "h_logo_r": self.header_logo_right_path
         }
 
+        # Pre-fetch custom header rows for thread-safe access
+        pre_fetched_header_rows = []
+        for r in self.header_rows:
+            if r.get('type') == 'standard': continue
+            pre_fetched_header_rows.append({
+                "type": r.get("type"),
+                "l_label": r.get("l_label_var").get().strip() if "l_label_var" in r else r.get("l_label", "").strip(),
+                "r_label": r.get("r_label_var").get().strip() if "r_label_var" in r else r.get("r_label", "").strip(),
+                "l_val": r.get("l_val").get().strip() if isinstance(r.get("l_val"), tk.Variable) else str(r.get("l_val", "")).strip(),
+                "r_val": r.get("r_val").get().strip() if isinstance(r.get("r_val"), tk.Variable) else str(r.get("r_val", "")).strip()
+            })
+        ui_data["custom_header_rows"] = pre_fetched_header_rows
+
         self.root.update()
 
         def safe_destroy():
@@ -927,6 +1038,20 @@ class CommercialApp(QuotationApp):
         if not hasattr(self, 'cursor'): self.init_database()
             
         try:
+            # Serialize custom header rows
+            serialized_header_rows = []
+            for r in self.header_rows:
+                if r.get('type') == 'standard': continue
+                serialized_header_rows.append({
+                    "type": r.get("type"),
+                    "bg": r.get("bg", "#ffffff"),
+                    "fg": r.get("fg", "#000000"),
+                    "l_label": r.get("l_label_var").get() if "l_label_var" in r else r.get("l_label", ""),
+                    "r_label": r.get("r_label_var").get() if "r_label_var" in r else r.get("r_label", ""),
+                    "l_val": r.get("l_val").get() if isinstance(r.get("l_val"), tk.Variable) else r.get("l_val", ""),
+                    "r_val": r.get("r_val").get() if isinstance(r.get("r_val"), tk.Variable) else r.get("r_val", "")
+                })
+
             full_data = json.dumps({
                 "header": {
                     "inv_no": self.quotation_no_var.get(), 
@@ -953,7 +1078,8 @@ class CommercialApp(QuotationApp):
                 },
                 "items": self.items_data,
                 "colors": self.row_colors,
-                "terms": self.terms_txt.get("1.0", "end-1c")
+                "terms": self.terms_txt.get("1.0", "end-1c"),
+                "header_rows": serialized_header_rows
             })
             
             try:
@@ -1012,7 +1138,22 @@ class CommercialApp(QuotationApp):
             self.ref_quot_no_var.set(h.get("quot_no", ""))
             self.items_data = data.get("items", [])
             self.row_colors = {int(k): v for k, v in data.get("colors", {}).items()}
+            
+            # Deserialize custom header rows
+            self.header_rows = []
+            for r in data.get("header_rows", []):
+                self.header_rows.append({
+                    "type": r.get("type"),
+                    "bg": r.get("bg", "#ffffff"),
+                    "fg": r.get("fg", "#000000"),
+                    "l_label_var": tk.StringVar(value=r.get("l_label", "")),
+                    "r_label_var": tk.StringVar(value=r.get("r_label", "")),
+                    "l_val": tk.StringVar(value=r.get("l_val", "")),
+                    "r_val": tk.StringVar(value=r.get("r_val", ""))
+                })
+
             self.refresh_tree()
+            self.refresh_custom_header_ui()
             self.recalc_all()
         except Exception as e:
             print(f"Error loading history data: {e}")

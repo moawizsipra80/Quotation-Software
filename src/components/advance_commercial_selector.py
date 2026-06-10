@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import sqlite3
 from src.config import get_db_path
-from src.invoice import InvoiceApp
+from src.advance_commercial import AdvanceCommercialApp
 
 def set_centered_geometry(win, width_pct, height_pct, max_w, max_h):
     screen_w = win.winfo_screenwidth()
@@ -13,12 +13,12 @@ def set_centered_geometry(win, width_pct, height_pct, max_w, max_h):
     y = (screen_h - h) // 2
     win.geometry(f"{w}x{h}+{x}+{y}")
 
-def open_invoice_hub(root_window):
-    """this is  History/Converter Hub of sales tax invoice """
+def open_advance_commercial_hub(root_window):
+    """Ye Advance Commercial Invoices ka History/Converter Hub hai"""
     
     # Popup Window
     hub = tk.Toplevel(root_window)
-    hub.title("Sales Tax Invoice Manager")
+    hub.title("Advance Commercial Invoice Manager")
     set_centered_geometry(hub, 0.75, 0.75, 950, 680)
     
     def on_hub_close():
@@ -28,18 +28,18 @@ def open_invoice_hub(root_window):
         hub.destroy()
     hub.protocol("WM_DELETE_WINDOW", on_hub_close)
     
-    lbl = tk.Label(hub, text="Sales Tax Invoice Manager", font=("Segoe UI", 16, "bold"), fg="#16a34a")
+    lbl = tk.Label(hub, text="Advance Commercial Invoice Manager", font=("Segoe UI", 16, "bold"), fg="#d35400")
     lbl.pack(pady=10)
 
-    # --- TABS (History, Quote Convert, Commercial Convert) ---
+    # --- TABS (History, Quote Convert, Invoice Convert) ---
     tabs = ttk.Notebook(hub)
     tabs.pack(fill='both', expand=True, padx=10, pady=5)
 
     # =========================================================
-    # TAB 1: EXISTING TAX INVOICES (History)
+    # TAB 1: EXISTING ADVANCE COMMERCIAL INVOICES (History)
     # =========================================================
     tab1 = ttk.Frame(tabs)
-    tabs.add(tab1, text="📂 Saved Tax History")
+    tabs.add(tab1, text="📂 Saved Advance Commercial History")
 
     cols = ("ID", "Inv No", "Client", "Date", "Amount")
     tree = ttk.Treeview(tab1, columns=cols, show='headings', height=10)
@@ -58,11 +58,11 @@ def open_invoice_hub(root_window):
         for i in tree.get_children(): 
             tree.delete(i)
         try:
-            conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
+            conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
             cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='advance_commercial_invoices'")
             if cur.fetchone():
-                cur.execute("SELECT id, ref_no, client_name, date, grand_total FROM tax_invoices ORDER BY id DESC")
+                cur.execute("SELECT id, ref_no, client_name, date, grand_total FROM advance_commercial_invoices ORDER BY id DESC")
                 for row in cur.fetchall():
                     amt = f"{row[4]:,.0f}" if row[4] else "0"
                     tree.insert("", "end", values=(row[0], row[1], row[2], row[3], amt))
@@ -75,27 +75,27 @@ def open_invoice_hub(root_window):
     def open_selected_invoice():
         sel = tree.selection()
         if not sel: 
-            messagebox.showwarning("Warning", "Please select a Tax Invoice to open!")
+            messagebox.showwarning("Warning", "Select an Advance Commercial Invoice first!")
             return
         inv_id = tree.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
+            conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
             cur = conn.cursor()
-            cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
+            cur.execute("SELECT full_data FROM advance_commercial_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
             conn.close()
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
-                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-                app = InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_advance_commercial(new_win))
+                app = AdvanceCommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
                 app.current_db_id = inv_id  # Existing ID for Update
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     tree.bind("<Double-1>", lambda event: open_selected_invoice())
-    ttk.Button(tab1, text="📂 Open Selected Sales Tax Invoice", command=open_selected_invoice).pack(fill='x', padx=50, pady=10)
+    ttk.Button(tab1, text="📂 Open Selected Advance Commercial Invoice", command=open_selected_invoice).pack(fill='x', padx=50, pady=10)
 
     # =========================================================
     # TAB 2: CONVERT QUOTATION (New from Quote)
@@ -141,19 +141,19 @@ def open_invoice_hub(root_window):
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
-                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-                InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_advance_commercial(new_win))
+                AdvanceCommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     tree2.bind("<Double-1>", lambda event: convert_quote())
-    ttk.Button(tab2, text="⬇ Load Quotation into Sales Tax Invoice", command=convert_quote).pack(fill='x', padx=50, pady=10)
+    ttk.Button(tab2, text="⬇ Load Quotation into Advance Commercial Invoice", command=convert_quote).pack(fill='x', padx=50, pady=10)
 
     # =========================================================
-    # TAB 3: CONVERT COMMERCIAL INVOICE
+    # TAB 3: CONVERT SALES TAX INVOICE (New from Invoice)
     # =========================================================
     tab3 = ttk.Frame(tabs)
-    tabs.add(tab3, text="🔄 Convert Commercial Invoice")
+    tabs.add(tab3, text="🔄 Convert Sales Tax Invoice")
     
     cols3 = ("ID", "Inv No", "Client", "Amount")
     tree3 = ttk.Treeview(tab3, columns=cols3, show='headings', height=10)
@@ -168,94 +168,40 @@ def open_invoice_hub(root_window):
     sb3.pack(side='right', fill='y')
 
     try:
-        conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
+        conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
         cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commercial_invoices'")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tax_invoices'")
         if cur.fetchone():
-            cur.execute("SELECT id, ref_no, client_name, grand_total FROM commercial_invoices ORDER BY id DESC")
+            cur.execute("SELECT id, ref_no, client_name, grand_total FROM tax_invoices ORDER BY id DESC")
             for row in cur.fetchall():
                 tree3.insert("", "end", values=row)
         conn.close()
     except: 
         pass
 
-    def convert_commercial_invoice():
+    def convert_sales_invoice():
         sel = tree3.selection()
         if not sel: 
-            messagebox.showwarning("Warning", "Select a Commercial Invoice first!")
+            messagebox.showwarning("Warning", "Select a Sales Tax Invoice first!")
             return
         inv_id = tree3.item(sel[0])['values'][0]
         try:
-            conn = sqlite3.connect(get_db_path("CommercialInvoice_Manager.db"))
+            conn = sqlite3.connect(get_db_path("TaxInvoice_Manager.db"))
             cur = conn.cursor()
-            cur.execute("SELECT full_data FROM commercial_invoices WHERE id=?", (inv_id,))
+            cur.execute("SELECT full_data FROM tax_invoices WHERE id=?", (inv_id,))
             row = cur.fetchone()
             conn.close()
             if row:
                 hub.destroy()
                 new_win = tk.Toplevel(root_window)
                 set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
-                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-                InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
+                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_advance_commercial(new_win))
+                AdvanceCommercialApp(new_win, original_root=root_window, from_quotation_data=row[0])
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    tree3.bind("<Double-1>", lambda event: convert_commercial_invoice())
-    ttk.Button(tab3, text="⬇ Load Commercial Invoice into Sales Tax Invoice", command=convert_commercial_invoice).pack(fill='x', padx=50, pady=10)
-
-    # =========================================================
-    # TAB 4: CONVERT ADVANCE COMMERCIAL INVOICE
-    # =========================================================
-    tab4 = ttk.Frame(tabs)
-    tabs.add(tab4, text="🔄 Convert Advance Commercial Invoice")
-    
-    cols4 = ("ID", "Inv No", "Client", "Amount")
-    tree4 = ttk.Treeview(tab4, columns=cols4, show='headings', height=10)
-    tree4.heading("ID", text="ID"); tree4.column("ID", width=40, anchor="center")
-    tree4.heading("Inv No", text="Inv No"); tree4.column("Inv No", width=100)
-    tree4.heading("Client", text="Client Name"); tree4.column("Client", width=200)
-    tree4.heading("Amount", text="Total"); tree4.column("Amount", width=100)
-    
-    sb4 = ttk.Scrollbar(tab4, orient="vertical", command=tree4.yview)
-    tree4.configure(yscrollcommand=sb4.set)
-    tree4.pack(side='left', fill='both', expand=True)
-    sb4.pack(side='right', fill='y')
-
-    try:
-        conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='advance_commercial_invoices'")
-        if cur.fetchone():
-            cur.execute("SELECT id, ref_no, client_name, grand_total FROM advance_commercial_invoices ORDER BY id DESC")
-            for row in cur.fetchall():
-                tree4.insert("", "end", values=row)
-        conn.close()
-    except: 
-        pass
-
-    def convert_advance_commercial_invoice():
-        sel = tree4.selection()
-        if not sel: 
-            messagebox.showwarning("Warning", "Select an Advance Commercial Invoice first!")
-            return
-        inv_id = tree4.item(sel[0])['values'][0]
-        try:
-            conn = sqlite3.connect(get_db_path("AdvanceCommercialInvoice_Manager.db"))
-            cur = conn.cursor()
-            cur.execute("SELECT full_data FROM advance_commercial_invoices WHERE id=?", (inv_id,))
-            row = cur.fetchone()
-            conn.close()
-            if row:
-                hub.destroy()
-                new_win = tk.Toplevel(root_window)
-                set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
-                new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-                InvoiceApp(new_win, original_root=root_window, from_quotation_data=row[0])
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-
-    tree4.bind("<Double-1>", lambda event: convert_advance_commercial_invoice())
-    ttk.Button(tab4, text="⬇ Load Advance Commercial Invoice into Sales Tax Invoice", command=convert_advance_commercial_invoice).pack(fill='x', padx=50, pady=10)
+    tree3.bind("<Double-1>", lambda event: convert_sales_invoice())
+    ttk.Button(tab3, text="⬇ Load Sales Invoice into Advance Commercial Invoice", command=convert_sales_invoice).pack(fill='x', padx=50, pady=10)
 
     # --- FOOTER: Create Blank ---
     ttk.Separator(hub, orient='horizontal').pack(fill='x', padx=10, pady=5)
@@ -264,19 +210,19 @@ def open_invoice_hub(root_window):
         hub.destroy()
         new_win = tk.Toplevel(root_window)
         set_centered_geometry(new_win, 0.85, 0.85, 1250, 820)
-        new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_invoice(new_win))
-        InvoiceApp(new_win, original_root=root_window)
+        new_win.protocol("WM_DELETE_WINDOW", lambda: safe_close_advance_commercial(new_win))
+        AdvanceCommercialApp(new_win, original_root=root_window)
 
-    ttk.Button(hub, text="➕ Create Fresh Blank Sales Tax Invoice", command=open_blank).pack(fill='x', padx=20, pady=10)
+    ttk.Button(hub, text="➕ Create Fresh Blank Advance Commercial Invoice", command=open_blank).pack(fill='x', padx=20, pady=10)
 
-def safe_close_invoice(win):
-    """Invoice window properly close karega without polluting main app"""
+def safe_close_advance_commercial(win):
+    """Advance Commercial window properly close karega without polluting main app"""
     try:
         if win.master:
             win.master.deiconify()
             try: win.master.state('zoomed')
             except: pass
-        print("✅ Invoice window closed cleanly")
+        print("✅ Advance Commercial window closed cleanly")
     except:
         pass
     finally:
