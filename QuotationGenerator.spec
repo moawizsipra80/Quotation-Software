@@ -8,11 +8,11 @@ datas = [
 ]
 binaries = []
 hiddenimports = [
-    'PIL.ImageTk', 'PIL.Image', 'openpyxl', 'qrcode', 'invoice', 'commercial', 
-    'delivery_challan', 'generator', 'analytics', 'scrapper', 'whatsapp_bot', 
-    'ui_styles', 'dashboard', 'theme_manager', 'models', 'insta_scraper',
-    'config', 'invoice_selector', 'commercial_selector', 'delivery_selector',
-    'pywinstyles', 'pyodbc', 'pandas', 'matplotlib', 'smtplib', 'ssl',
+    'PIL.ImageTk', 'PIL.Image', 'openpyxl', 'qrcode', 'invoice', 'commercial',
+    'advance_commercial', 'delivery_challan', 'generator', 'analytics', 'scrapper',
+    'whatsapp_bot', 'ui_styles', 'dashboard', 'theme_manager', 'models', 'insta_scraper',
+    'config', 'invoice_selector', 'commercial_selector', 'advance_commercial_selector',
+    'delivery_selector', 'pywinstyles', 'pyodbc', 'pandas', 'matplotlib', 'smtplib', 'ssl',
     'sqlite3', 'json', 'copy', 'tempfile', 'threading'
 ]
 

@@ -94,6 +94,7 @@ jobs:
             --hidden-import="dashboard" \
             --hidden-import="invoice" \
             --hidden-import="commercial" \
+            --hidden-import="advance_commercial" \
             --hidden-import="delivery_challan" \
             --hidden-import="analytics" \
             --hidden-import="generator" \
@@ -104,6 +105,7 @@ jobs:
             --hidden-import="theme_manager" \
             --hidden-import="invoice_selector" \
             --hidden-import="commercial_selector" \
+            --hidden-import="advance_commercial_selector" \
             --hidden-import="delivery_selector" \
             src/quotation.py
 
