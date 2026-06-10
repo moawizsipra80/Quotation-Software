@@ -47,6 +47,14 @@ This is a professional Quotation management software designed to streamline the 
 3. **Setup**: On the first run, you will be prompted to set up an Admin profile.
 4. **Operation**: Use the dashboard to navigate between creating quotations, invoices, and managing marketing tools.
 
+--
+<img width="1919" height="1199" alt="image" src="https://github.com/user-attachments/assets/4b3c0656-6052-4173-be0c-a0ee12ffb300" />
+
+<img width="1919" height="1199" alt="image" src="https://github.com/user-attachments/assets/c64c87d2-2605-433f-8f53-27bad1fe55f4" />
+
+<img width="1917" height="1124" alt="image" src="https://github.com/user-attachments/assets/58f2f85e-b95f-45fa-b9fc-9e1726492649" />
+
+
 ## Public Downloads While Source Stays Private
 Use this repository as private source code, and publish installers to a separate public repository:
 
